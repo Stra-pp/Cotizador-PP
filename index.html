@@ -687,6 +687,7 @@ function hospedajeState(){
     clienteNombre: '',
     folio: 'BORRADOR',
     telefono: '',
+    canal: 'tel', usuarioRed: '',
     roomCardId: 'std_doble',
     fecha: fmtYMD(new Date()),
     noches: 1,
@@ -890,8 +891,16 @@ function renderHospedaje(){
           <h3>Estadía</h3>
           <label>Nombre del cliente (opcional, para el mensaje)</label>
           <input type="text" id="h_cliente" placeholder="Ej: Sra. María Pérez" value="${esc(st.clienteNombre)}">
-        <label>Teléfono / WhatsApp del cliente (obligatorio para guardar)</label>
-        <input type="text" id="h_tel" placeholder="Ej: 0991234567" inputmode="tel" value="${esc(st.telefono)}">
+        <label>¿Por qué canal escribió el cliente?</label>
+        <select id="h_canal">${Object.keys(CANAL_LABEL).map(c=>`<option value="${c}" ${canalDe(st)===c?'selected':''}>${CANAL_LABEL[c]}</option>`).join('')}</select>
+        <div id="h_telBox" ${canalDe(st)!=='tel'?'hidden':''}>
+          <label>Teléfono / WhatsApp del cliente (obligatorio para guardar)</label>
+          <input type="text" id="h_tel" placeholder="Ej: 0991234567" inputmode="tel" value="${esc(st.telefono)}">
+        </div>
+        <div id="h_userBox" ${canalDe(st)==='tel'?'hidden':''}>
+          <label id="h_userLabel">Usuario del cliente en ${CANAL_LABEL[canalDe(st)]} (obligatorio para guardar)</label>
+          <input type="text" id="h_user" placeholder="Ej: @maria.perez" value="${esc(st.usuarioRed)}">
+        </div>
         <div class="qbar" id="qbar_h"></div>
           <div id="h_fechaBox" ${st.categoria==='festivo'?'hidden':''}>
             <div class="row">
@@ -1037,6 +1046,11 @@ function renderHospedaje(){
 
   // listeners
   document.getElementById('h_tel').oninput = e=>{ st.telefono=e.target.value; e.target.style.borderColor=''; if(normTel(e.target.value).length>=8) avisoCotizacion('h',''); renderQuoteBar('h'); };
+  document.getElementById('h_user').oninput = e=>{ st.usuarioRed=limpiarTxt(e.target.value); e.target.style.borderColor=''; if(normUser(e.target.value).length>=2) avisoCotizacion('h',''); renderQuoteBar('h'); };
+  document.getElementById('h_canal').onchange = e=>{ st.canal=e.target.value; const tel=canalDe(st)==='tel';
+    document.getElementById('h_telBox').hidden=!tel; document.getElementById('h_userBox').hidden=tel;
+    document.getElementById('h_userLabel').textContent=`Usuario del cliente en ${CANAL_LABEL[canalDe(st)]} (obligatorio para guardar)`;
+    avisoCotizacion('h',''); renderQuoteBar('h'); };
   document.getElementById('h_cliente').oninput = e=>{ st.clienteNombre=limpiarTxt(e.target.value); computeHospedaje(); renderQuoteBar('h'); };
   document.getElementById('h_fecha').onchange = e=>{ st.fecha=e.target.value; computeHospedaje(); };
   document.getElementById('h_noches').oninput = e=>{ st.noches=Math.max(1,parseInt(e.target.value)||1); computeHospedaje(); };
@@ -1585,6 +1599,7 @@ function poolState(){
     clienteNombre: '',
     folio: 'BORRADOR',
     telefono: '',
+    canal: 'tel', usuarioRed: '',
     fecha: fmtYMD(new Date()),
     fechaReserva: fmtYMD(new Date()),
     tipo: 'regular',
@@ -1607,8 +1622,16 @@ function renderPoolDay(){
         <h3>Reserva</h3>
         <label>Nombre del cliente (opcional, para el mensaje)</label>
         <input type="text" id="p_cliente" placeholder="Ej: Sr. Juan Torres" value="${esc(st.clienteNombre)}">
-        <label>Teléfono / WhatsApp del cliente (obligatorio para guardar)</label>
-        <input type="text" id="p_tel" placeholder="Ej: 0991234567" inputmode="tel" value="${esc(st.telefono)}">
+        <label>¿Por qué canal escribió el cliente?</label>
+        <select id="p_canal">${Object.keys(CANAL_LABEL).map(c=>`<option value="${c}" ${canalDe(st)===c?'selected':''}>${CANAL_LABEL[c]}</option>`).join('')}</select>
+        <div id="p_telBox" ${canalDe(st)!=='tel'?'hidden':''}>
+          <label>Teléfono / WhatsApp del cliente (obligatorio para guardar)</label>
+          <input type="text" id="p_tel" placeholder="Ej: 0991234567" inputmode="tel" value="${esc(st.telefono)}">
+        </div>
+        <div id="p_userBox" ${canalDe(st)==='tel'?'hidden':''}>
+          <label id="p_userLabel">Usuario del cliente en ${CANAL_LABEL[canalDe(st)]} (obligatorio para guardar)</label>
+          <input type="text" id="p_user" placeholder="Ej: @maria.perez" value="${esc(st.usuarioRed)}">
+        </div>
         <div class="qbar" id="qbar_p"></div>
         <label>Fecha de la visita</label><input type="date" id="p_fecha" value="${st.fecha}">
         <label>Tipo de Pool Day</label>
@@ -1648,6 +1671,11 @@ function renderPoolDay(){
     </div>
   `;
   document.getElementById('p_tel').oninput = e=>{ st.telefono=e.target.value; e.target.style.borderColor=''; if(normTel(e.target.value).length>=8) avisoCotizacion('p',''); renderQuoteBar('p'); };
+  document.getElementById('p_user').oninput = e=>{ st.usuarioRed=limpiarTxt(e.target.value); e.target.style.borderColor=''; if(normUser(e.target.value).length>=2) avisoCotizacion('p',''); renderQuoteBar('p'); };
+  document.getElementById('p_canal').onchange = e=>{ st.canal=e.target.value; const tel=canalDe(st)==='tel';
+    document.getElementById('p_telBox').hidden=!tel; document.getElementById('p_userBox').hidden=tel;
+    document.getElementById('p_userLabel').textContent=`Usuario del cliente en ${CANAL_LABEL[canalDe(st)]} (obligatorio para guardar)`;
+    avisoCotizacion('p',''); renderQuoteBar('p'); };
   document.getElementById('p_cliente').oninput = e=>{ st.clienteNombre=limpiarTxt(e.target.value); computePool(); renderQuoteBar('p'); };
   document.getElementById('p_fecha').onchange = e=>{ st.fecha=e.target.value; computePool(); };
   document.getElementById('p_tipo').onchange = e=>{ st.tipo=e.target.value; computePool(); };
@@ -2996,6 +3024,7 @@ function diurnoState(){
     clienteNombre: '',
     folio: 'BORRADOR',
     telefono: '',
+    canal: 'tel', usuarioRed: '',
     fecha: fmtYMD(new Date()),
     personas: '2',
     unidades: 1,
@@ -3016,8 +3045,16 @@ function renderDiurno(){
         <h3>Visita</h3>
         <label>Nombre del cliente (opcional)</label>
         <input type="text" id="d_cliente" placeholder="Ej: Sr. Luis Andrade" value="${esc(st.clienteNombre)}">
-        <label>Teléfono / WhatsApp del cliente (obligatorio para guardar)</label>
-        <input type="text" id="d_tel" placeholder="Ej: 0991234567" inputmode="tel" value="${esc(st.telefono)}">
+        <label>¿Por qué canal escribió el cliente?</label>
+        <select id="d_canal">${Object.keys(CANAL_LABEL).map(c=>`<option value="${c}" ${canalDe(st)===c?'selected':''}>${CANAL_LABEL[c]}</option>`).join('')}</select>
+        <div id="d_telBox" ${canalDe(st)!=='tel'?'hidden':''}>
+          <label>Teléfono / WhatsApp del cliente (obligatorio para guardar)</label>
+          <input type="text" id="d_tel" placeholder="Ej: 0991234567" inputmode="tel" value="${esc(st.telefono)}">
+        </div>
+        <div id="d_userBox" ${canalDe(st)==='tel'?'hidden':''}>
+          <label id="d_userLabel">Usuario del cliente en ${CANAL_LABEL[canalDe(st)]} (obligatorio para guardar)</label>
+          <input type="text" id="d_user" placeholder="Ej: @maria.perez" value="${esc(st.usuarioRed)}">
+        </div>
         <div class="qbar" id="qbar_d"></div>
         <label>Fecha de visita</label>
         <input type="date" id="d_fecha" value="${st.fecha}">
@@ -3047,6 +3084,11 @@ function renderDiurno(){
     </div>
   `;
   document.getElementById('d_tel').oninput = e=>{ st.telefono=e.target.value; e.target.style.borderColor=''; if(normTel(e.target.value).length>=8) avisoCotizacion('d',''); renderQuoteBar('d'); };
+  document.getElementById('d_user').oninput = e=>{ st.usuarioRed=limpiarTxt(e.target.value); e.target.style.borderColor=''; if(normUser(e.target.value).length>=2) avisoCotizacion('d',''); renderQuoteBar('d'); };
+  document.getElementById('d_canal').onchange = e=>{ st.canal=e.target.value; const tel=canalDe(st)==='tel';
+    document.getElementById('d_telBox').hidden=!tel; document.getElementById('d_userBox').hidden=tel;
+    document.getElementById('d_userLabel').textContent=`Usuario del cliente en ${CANAL_LABEL[canalDe(st)]} (obligatorio para guardar)`;
+    avisoCotizacion('d',''); renderQuoteBar('d'); };
   document.getElementById('d_cliente').oninput = e=>{ st.clienteNombre=limpiarTxt(e.target.value); computeDiurno(); renderQuoteBar('d'); };
   document.getElementById('d_fecha').onchange = e=>{ st.fecha=e.target.value; computeDiurno(); };
   document.getElementById('d_personas').onchange = e=>{ st.personas=e.target.value; computeDiurno(); };
@@ -3141,6 +3183,7 @@ function eventosState(){
     clienteNombre: '',
     folio: 'BORRADOR',
     telefono: '',
+    canal: 'tel', usuarioRed: '',
     evento: 'nocheBuena', // nocheBuena | finDeAno
     finDeAnoOpcion: 'cenaFiesta',
     adultos: 2,
@@ -3160,8 +3203,16 @@ function renderEventos(){
         <h3>Evento</h3>
         <label>Nombre del cliente (opcional)</label>
         <input type="text" id="e_cliente" placeholder="Ej: Sra. Gabriela Ríos" value="${esc(st.clienteNombre)}">
-        <label>Teléfono / WhatsApp del cliente (obligatorio para guardar)</label>
-        <input type="text" id="e_tel" placeholder="Ej: 0991234567" inputmode="tel" value="${esc(st.telefono)}">
+        <label>¿Por qué canal escribió el cliente?</label>
+        <select id="e_canal">${Object.keys(CANAL_LABEL).map(c=>`<option value="${c}" ${canalDe(st)===c?'selected':''}>${CANAL_LABEL[c]}</option>`).join('')}</select>
+        <div id="e_telBox" ${canalDe(st)!=='tel'?'hidden':''}>
+          <label>Teléfono / WhatsApp del cliente (obligatorio para guardar)</label>
+          <input type="text" id="e_tel" placeholder="Ej: 0991234567" inputmode="tel" value="${esc(st.telefono)}">
+        </div>
+        <div id="e_userBox" ${canalDe(st)==='tel'?'hidden':''}>
+          <label id="e_userLabel">Usuario del cliente en ${CANAL_LABEL[canalDe(st)]} (obligatorio para guardar)</label>
+          <input type="text" id="e_user" placeholder="Ej: @maria.perez" value="${esc(st.usuarioRed)}">
+        </div>
         <div class="qbar" id="qbar_e"></div>
         <label>Evento</label>
         <select id="e_evento">
@@ -3195,6 +3246,11 @@ function renderEventos(){
     </div>
   `;
   document.getElementById('e_tel').oninput = e=>{ st.telefono=e.target.value; e.target.style.borderColor=''; if(normTel(e.target.value).length>=8) avisoCotizacion('e',''); renderQuoteBar('e'); };
+  document.getElementById('e_user').oninput = e=>{ st.usuarioRed=limpiarTxt(e.target.value); e.target.style.borderColor=''; if(normUser(e.target.value).length>=2) avisoCotizacion('e',''); renderQuoteBar('e'); };
+  document.getElementById('e_canal').onchange = e=>{ st.canal=e.target.value; const tel=canalDe(st)==='tel';
+    document.getElementById('e_telBox').hidden=!tel; document.getElementById('e_userBox').hidden=tel;
+    document.getElementById('e_userLabel').textContent=`Usuario del cliente en ${CANAL_LABEL[canalDe(st)]} (obligatorio para guardar)`;
+    avisoCotizacion('e',''); renderQuoteBar('e'); };
   document.getElementById('e_cliente').oninput = e=>{ st.clienteNombre=limpiarTxt(e.target.value); computeEventos(); renderQuoteBar('e'); };
   document.getElementById('e_evento').onchange = e=>{ st.evento=e.target.value; renderEventos(); };
   document.getElementById('e_adultos').oninput = e=>{ st.adultos=Math.max(0,parseInt(e.target.value)||0); computeEventos(); };
@@ -3333,6 +3389,14 @@ function ymdEC(iso){ try{ return new Date(iso).toLocaleDateString('en-CA',{timeZ
 function gid(){ return 'c'+Date.now().toString(36)+Math.random().toString(36).slice(2,8); }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function limpiarTxt(s){ return String(s||'').replace(/[<>]/g,''); }
+const CANAL_LABEL = {tel:'WhatsApp / llamada', ig:'Instagram', fb:'Facebook', tt:'TikTok'};
+function canalDe(x){ return (x && CANAL_LABEL[x.canal]) ? x.canal : 'tel'; }
+// Usuario de una red social: sin @, sin enlace, sin espacios y en minúsculas (para reconocer al mismo cliente).
+function normUser(u){ return String(u||'').trim().replace(/^(https?:\/\/)?(www\.|m\.)?(instagram|facebook|fb|tiktok)\.com\//i,'').replace(/^@+/,'').replace(/[\/?#].*$/,'').replace(/\s+/g,'').toLowerCase(); }
+// El cliente se identifica por su teléfono (WhatsApp / llamada) o, si escribió por Instagram, Facebook o TikTok, por su usuario.
+function claveCliente(x){ const c = canalDe(x); if(c==='tel'){ const t = normTel(x.telefono); return t.length>=8 ? 'tel:'+t : ''; } const u = normUser(x.usuarioRed); return u.length>=2 ? c+':'+u : ''; }
+function etiquetaCliente(x){ const c = canalDe(x); return c==='tel' ? normTel(x.telefono) : `${CANAL_LABEL[c]} @${normUser(x.usuarioRed)}`; }
+function claveDeRegistro(r){ return r.clave || (normTel(r.telefono).length>=8 ? 'tel:'+normTel(r.telefono) : ''); }
 function normTel(t){ let d = String(t||'').replace(/\D/g,''); if(d.startsWith('593')) d = d.slice(3); if(d.startsWith('0')) d = d.slice(1); return d; }
 
 const DEMO = /[?&]demo=1/.test(location.search); // modo demostración: datos locales, sin Microsoft
@@ -3600,14 +3664,14 @@ function quoteFirma(key, st, total){
 function diffFirma(a, b){ return ['precio','fechas','habitaciones','servicio'].filter(k=>a[k]!==b[k]); }
 function snapshotDe(st){ return JSON.parse(JSON.stringify(st, (k,v)=> k==='img' ? undefined : v)); }
 // Mensaje visible bajo el cliente (rojo) cuando falta algo para guardar o descargar; se borra solo al guardar.
-function avisoCotizacion(key, msg, resaltarTel){
+function avisoCotizacion(key, msg, campo){
   const bar = document.getElementById('qbar_'+key); if(!bar) return;
   let el = document.getElementById('qerr_'+key);
-  if(!msg){ if(el) el.remove(); const t0 = document.getElementById(key+'_tel'); if(t0) t0.style.borderColor = ''; return; }
+  if(!msg){ if(el) el.remove(); ['tel','user'].forEach(c=>{ const t0 = document.getElementById(key+'_'+c); if(t0) t0.style.borderColor = ''; }); return; }
   if(!el){ el = document.createElement('div'); el.id = 'qerr_'+key; el.className = 'warn danger'; el.style.marginTop = '8px'; bar.appendChild(el); }
   el.textContent = msg;
-  const t = document.getElementById(key+'_tel');
-  if(resaltarTel && t){ t.style.borderColor = '#C20F2F'; t.focus(); try{ t.scrollIntoView({block:'center', behavior:'smooth'}); }catch(e){} }
+  const t = document.getElementById(key+'_'+(campo===true?'tel':campo));
+  if(campo && t){ t.style.borderColor = '#C20F2F'; t.focus(); try{ t.scrollIntoView({block:'center', behavior:'smooth'}); }catch(e){} }
   else bar.scrollIntoView({block:'center', behavior:'smooth'});
 }
 // Antes de descargar o copiar: guarda la cotización. Si SharePoint falla (no por datos faltantes), ofrece descargarla igual.
@@ -3622,9 +3686,14 @@ async function guardarCotizacion(key, opts){
   T.compute();
   const blocks = T.blocks();
   if(!blocks){ avisoCotizacion(key, 'Completa la cotización (habitación, fechas o personas) antes de guardarla o descargarla.'); return null; }
-  const tel = normTel(st.telefono);
-  if(tel.length<8){ avisoCotizacion(key, 'Falta el teléfono / WhatsApp del cliente. Escríbelo en el campo de arriba para poder guardar y descargar: con él llevamos el índice de ajustes.', true); return null; }
+  const canal = canalDe(st), clave = claveCliente(st);
+  if(!clave){
+    if(canal==='tel') avisoCotizacion(key, 'Falta el teléfono / WhatsApp del cliente. Escríbelo en el campo de arriba para poder guardar y descargar: con él llevamos el índice de ajustes.', 'tel');
+    else avisoCotizacion(key, `Falta el usuario del cliente en ${CANAL_LABEL[canal]} (por ejemplo @maria.perez). Escríbelo en el campo de arriba para poder guardar y descargar: con él llevamos el índice de ajustes.`, 'user');
+    return null;
+  }
   avisoCotizacion(key, '');
+  const tel = canal==='tel' ? normTel(st.telefono) : '', usuarioRed = canal==='tel' ? '' : limpiarTxt(st.usuarioRed).trim();
   const total = totalFromBlocks(blocks); const firma = quoteFirma(key, st, total); const cliente = limpiarTxt(st.clienteNombre).trim();
   if(!(await cargarCotizaciones(true))){ window.__fallaGuardado = 'no se pudo leer la lista de cotizaciones'; return null; }
   const prev = st.folioGuardado ? ultimaVersion(st.folioGuardado) : null;
@@ -3632,13 +3701,13 @@ async function guardarCotizacion(key, opts){
     const cambios = diffFirma(prev.firma, firma);
     if(!cambios.length){
       // Sin cambios de precio, fechas, habitaciones ni servicio: no es un ajuste. Solo se actualizan los datos del cliente.
-      if(prev.telefono!==tel || prev.cliente!==cliente){ prev.telefono = tel; prev.telefonoRaw = st.telefono.trim(); prev.cliente = cliente; await Store.writeQuote(prev); }
+      if(claveDeRegistro(prev)!==clave || canalDe(prev)!==canal || prev.cliente!==cliente){ Object.assign(prev, {canal, usuarioRed, clave, telefono:tel, telefonoRaw:(canal==='tel'?st.telefono.trim():''), cliente}); await Store.writeQuote(prev); }
       if(!opts.silent) showToast(`Sin cambios desde la V${prev.version}`); renderQuoteBar(key); return prev;
     }
   }
   let folio = st.folioGuardado || await siguienteFolio();
   const rec = {id:gid(), folio, version: prev ? prev.version+1 : 1, tipo: T.tipo, tipoClave:key, enPaquete:(key==='h' && st.categoria==='festivo'),
-    cliente, telefono:tel, telefonoRaw:st.telefono.trim(), usuario:{id:CURRENT_USER.id, nombre:CURRENT_USER.nombre},
+    cliente, canal, usuarioRed, clave, telefono:tel, telefonoRaw:(canal==='tel'?st.telefono.trim():''), usuario:{id:CURRENT_USER.id, nombre:CURRENT_USER.nombre},
     fecha:nowISO(), total, firma, ajusteTipos: prev ? diffFirma(prev.firma, firma) : [], estado:'Guardada', snapshot:snapshotDe(st)};
   try{ await Store.writeQuote(rec); }catch(e){ window.__fallaGuardado = e.message || 'error desconocido'; showToast('No se pudo guardar en SharePoint: '+(e.message||e)); return null; }
   if(!prev){
@@ -3653,19 +3722,19 @@ async function guardarCotizacion(key, opts){
   if(!opts.silent) showToast(`Guardada ${folio} · V${rec.version}`);
   return rec;
 }
-function clienteResumen(tel){
-  const mias = QUOTES.filter(r=>normTel(r.telefono)===tel && (verTodo(CURRENT_USER) || (r.usuario && r.usuario.id===CURRENT_USER.id)));
+function clienteResumen(clave){
+  const mias = QUOTES.filter(r=>claveDeRegistro(r)===clave && (verTodo(CURRENT_USER) || (r.usuario && r.usuario.id===CURRENT_USER.id)));
   const folios = new Set(mias.map(r=>r.folio)); const n = folios.size;
   const ajustes = [...folios].reduce((s,f)=>s+(Math.max(...mias.filter(r=>r.folio===f).map(r=>r.version))-1), 0);
   return {cotizaciones:n, ajustes, indice: n ? ajustes/n : 0};
 }
 function renderQuoteBar(key){
   const el = document.getElementById('qbar_'+key); if(!el) return;
-  const st = TAB[key].state(); const guardada = !!st.folioGuardado; const tel = normTel(st.telefono);
-  const res = (tel.length>=8 && CURRENT_USER) ? clienteResumen(tel) : null;
+  const st = TAB[key].state(); const guardada = !!st.folioGuardado; const clave = claveCliente(st);
+  const res = (clave && CURRENT_USER) ? clienteResumen(clave) : null;
   el.innerHTML = `<div class="qb-top"><div class="qb-id">${guardada ? esc(st.folio)+' · V'+st.version+(st.version>1 ? ' · '+(st.version-1)+' ajuste'+(st.version>2?'s':'') : '') : 'Borrador (sin guardar)'}</div>
     <div class="qb-actions"><button type="button" class="btn small" id="qb_save_${key}">💾 Guardar cotización</button><button type="button" class="btn secondary small" id="qb_new_${key}">＋ Nueva</button></div></div>
-    <div class="small-note">${res ? `Este cliente: ${res.cotizaciones} cotización(es) · ${res.ajustes} ajuste(s) · índice ${res.indice.toFixed(1)}` : 'Escribe el teléfono / WhatsApp del cliente para guardar y llevar su índice de ajustes.'}</div>`;
+    <div class="small-note">${res ? `Este cliente: ${res.cotizaciones} cotización(es) · ${res.ajustes} ajuste(s) · índice ${res.indice.toFixed(1)}` : (canalDe(st)==='tel' ? 'Escribe el teléfono / WhatsApp del cliente para guardar y llevar su índice de ajustes.' : `Escribe el usuario del cliente en ${CANAL_LABEL[canalDe(st)]} para guardar y llevar su índice de ajustes.`)}</div>`;
   document.getElementById('qb_save_'+key).onclick = ()=>guardarCotizacion(key);
   document.getElementById('qb_new_'+key).onclick = ()=>nuevaCotizacion(key);
 }
@@ -3681,7 +3750,7 @@ function abrirCotizacion(folio){
   const st = JSON.parse(JSON.stringify(v.snapshot));
   if(st.lineas) st.lineas.forEach(l=>{ l.img = roomPhotoFor(l.label); });
   if(!st.pex) st.pex = [0, parseInt(st.personasExtra)||0, 0]; // formato anterior: un solo contador
-  st.clienteNombre = limpiarTxt(v.cliente); st.telefono = v.telefonoRaw || v.telefono;
+  st.clienteNombre = limpiarTxt(v.cliente); st.telefono = v.telefonoRaw || v.telefono || ''; st.canal = canalDe(v); st.usuarioRed = v.usuarioRed || '';
   st.folio = v.folio; st.folioGuardado = v.folio; st.version = v.version;
   window[T.v] = st; T.render();
   document.querySelector(`.tab-btn[data-tab="${T.tabId}"]`).click();
@@ -3696,7 +3765,7 @@ function abrirCotizacion(folio){
 function agrupar(recs){
   const por = new Map(); recs.forEach(r=>{ const a = por.get(r.folio) || []; a.push(r); por.set(r.folio, a); });
   return [...por.values()].map(vs=>{ vs.sort((a,b)=>a.version-b.version); const first = vs[0], last = vs[vs.length-1];
-    return {folio:first.folio, tipo:first.tipo, owner:first.usuario, cliente:last.cliente, tel:normTel(last.telefono), versiones:vs, ultima:last, ajustes:vs.length-1}; })
+    return {folio:first.folio, tipo:first.tipo, owner:first.usuario, cliente:last.cliente, clave:claveDeRegistro(last), etiqueta:etiquetaCliente(last), versiones:vs, ultima:last, ajustes:vs.length-1}; })
     .sort((a,b)=>b.ultima.fecha.localeCompare(a.ultima.fecha));
 }
 const idx = (aj, n) => n ? (aj/n).toFixed(1) : '0.0';
@@ -3709,10 +3778,10 @@ async function renderCotizaciones(){
   if(todo && f.usuario) recs = recs.filter(r=>r.usuario.id===f.usuario);
   if(f.tipo) recs = recs.filter(r=>r.tipo===f.tipo);
   const q = f.q.trim().toLowerCase();
-  if(q) recs = recs.filter(r=>(r.cliente||'').toLowerCase().includes(q) || (r.telefono||'').includes(q.replace(/\D/g,'')||'§') || (r.folio||'').toLowerCase().includes(q));
+  if(q) recs = recs.filter(r=>(r.cliente||'').toLowerCase().includes(q) || (r.telefono||'').includes(q.replace(/\D/g,'')||'§') || (r.usuarioRed||'').toLowerCase().includes(q.replace(/^@/,'')) || (r.folio||'').toLowerCase().includes(q));
   const quotes = agrupar(recs); const nAj = quotes.reduce((s,x)=>s+x.ajustes, 0);
   const porUsuario = [...quotes.reduce((m,x)=>{ const k = x.owner.id; const o = m.get(k) || {nombre:x.owner.nombre, n:0, aj:0, total:0}; o.n++; o.aj += x.ajustes; o.total += x.ultima.total; m.set(k,o); return m; }, new Map()).values()].sort((a,b)=>b.n-a.n);
-  const porCliente = [...quotes.reduce((m,x)=>{ const k = x.tel || ('s/t-'+x.folio); const o = m.get(k) || {tel:x.tel, cliente:x.cliente, n:0, aj:0, ult:'', users:new Set()}; o.n++; o.aj += x.ajustes; if(x.ultima.fecha>o.ult){ o.ult = x.ultima.fecha; o.cliente = x.cliente || o.cliente; } if(!o.cliente && x.cliente) o.cliente = x.cliente; o.users.add(x.owner.nombre); m.set(k,o); return m; }, new Map()).values()].sort((a,b)=>b.aj-a.aj||b.n-a.n);
+  const porCliente = [...quotes.reduce((m,x)=>{ const k = x.clave || ('s/c-'+x.folio); const o = m.get(k) || {etiqueta:x.etiqueta, cliente:x.cliente, n:0, aj:0, ult:'', users:new Set()}; o.n++; o.aj += x.ajustes; if(x.ultima.fecha>o.ult){ o.ult = x.ultima.fecha; o.cliente = x.cliente || o.cliente; } if(!o.cliente && x.cliente) o.cliente = x.cliente; o.users.add(x.owner.nombre); m.set(k,o); return m; }, new Map()).values()].sort((a,b)=>b.aj-a.aj||b.n-a.n);
   const tipos = [...new Set(QUOTES.map(r=>r.tipo))];
   el.innerHTML = `
     <div class="topbar"><div><h2>${todo?'Cotizaciones del equipo':'Mis cotizaciones'}</h2>
@@ -3727,10 +3796,10 @@ async function renderCotizaciones(){
     </div>
     ${todo?`<div class="card"><h3>Índice por usuario</h3><table class="tbl"><tr><th>Usuario</th><th>Cotizaciones</th><th>Ajustes</th><th>Índice</th><th style="text-align:right;">Total cotizado</th></tr>
       ${porUsuario.map(u=>`<tr><td>${esc(u.nombre)}</td><td>${u.n}</td><td>${u.aj}</td><td>${idx(u.aj,u.n)}</td><td style="text-align:right;">${money(u.total)}</td></tr>`).join('')||'<tr><td colspan="5" class="muted">Sin datos.</td></tr>'}</table></div>`:''}
-    <div class="card"><h3>Índice por cliente</h3><table class="tbl"><tr><th>Cliente</th><th>Teléfono</th>${todo?'<th>Atendido por</th>':''}<th>Cotizaciones</th><th>Ajustes</th><th>Índice</th></tr>
-      ${porCliente.slice(0,200).map(c=>`<tr><td>${esc(c.cliente)||'<span class="muted">(sin nombre)</span>'}</td><td>${esc(c.tel)||'—'}</td>${todo?`<td>${esc([...c.users].join(', '))}</td>`:''}<td>${c.n}</td><td>${c.aj}</td><td>${idx(c.aj,c.n)}</td></tr>`).join('')||'<tr><td colspan="6" class="muted">Sin cotizaciones todavía.</td></tr>'}</table></div>
+    <div class="card"><h3>Índice por cliente</h3><table class="tbl"><tr><th>Cliente</th><th>Teléfono / usuario</th>${todo?'<th>Atendido por</th>':''}<th>Cotizaciones</th><th>Ajustes</th><th>Índice</th></tr>
+      ${porCliente.slice(0,200).map(c=>`<tr><td>${esc(c.cliente)||'<span class="muted">(sin nombre)</span>'}</td><td>${esc(c.etiqueta)||'—'}</td>${todo?`<td>${esc([...c.users].join(', '))}</td>`:''}<td>${c.n}</td><td>${c.aj}</td><td>${idx(c.aj,c.n)}</td></tr>`).join('')||'<tr><td colspan="6" class="muted">Sin cotizaciones todavía.</td></tr>'}</table></div>
     <div class="card"><h3>Cotizaciones</h3><table class="tbl"><tr><th>N.º</th><th>Versión</th><th>Tipo</th><th>Cliente</th>${todo?'<th>Usuario</th>':''}<th>Última</th><th style="text-align:right;">Total</th><th></th></tr>
-      ${quotes.slice(0,300).map(x=>`<tr><td>${esc(x.folio)}</td><td>V${x.ultima.version}${x.ajustes?` · ${x.ajustes} ajuste${x.ajustes>1?'s':''}`:''}</td><td>${esc(x.tipo)}</td><td>${esc(x.cliente)||'—'}<br><span class="muted" style="font-size:11px;">${esc(x.tel)}</span></td>${todo?`<td>${esc(x.owner.nombre)}</td>`:''}<td>${esc(ymdEC(x.ultima.fecha))}</td><td style="text-align:right;">${money(x.ultima.total)}</td>
+      ${quotes.slice(0,300).map(x=>`<tr><td>${esc(x.folio)}</td><td>V${x.ultima.version}${x.ajustes?` · ${x.ajustes} ajuste${x.ajustes>1?'s':''}`:''}</td><td>${esc(x.tipo)}</td><td>${esc(x.cliente)||'—'}<br><span class="muted" style="font-size:11px;">${esc(x.etiqueta)}</span></td>${todo?`<td>${esc(x.owner.nombre)}</td>`:''}<td>${esc(ymdEC(x.ultima.fecha))}</td><td style="text-align:right;">${money(x.ultima.total)}</td>
         <td style="white-space:nowrap;"><button class="btn small" data-abrir="${esc(x.folio)}">Abrir / ajustar</button> <button class="btn secondary small" data-ver="${esc(x.folio)}">Versiones</button></td></tr>`).join('')||'<tr><td colspan="8" class="muted">Sin cotizaciones todavía.</td></tr>'}</table></div>`;
   const $ = id => document.getElementById(id);
   if($('cq_user')) $('cq_user').onchange = e=>{ f.usuario = e.target.value; renderCotizaciones(); };
