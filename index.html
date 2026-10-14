@@ -303,7 +303,7 @@ function defaultConfig(){
     checkIn:'15h00', checkOut:'12h00',
     politicaHospedaje:'Esta cotización tiene una validez de 24 horas. Para confirmar la reserva se solicita el 50% de garantía (transferencia, depósito o tarjeta de crédito); el saldo se cancela al check-in. Los valores abonados no son reembolsables.',
     politicaPoolday:'Las reservas no aplican reembolso. Se permite un cambio de fecha con mínimo 24 horas de anticipación (aplica una sola vez). Para confirmar se solicita el 50% o 100% de pago previo (Payphone, depósito o transferencia).',
-    extraPersonaPorNoche: 80,
+    extraPersonaPorNoche: {AI:100, FB:80, BB:60}, // persona extra por noche (sin impuestos) según el plan
     mascotaPorNoche: { pequena:25, grande:30 },
 
     // Pendientes solicitados por Maira (correo 29-sep-2026) — sin valores aún, no se ofrecen al cliente hasta llenarlos.
@@ -581,6 +581,7 @@ function migrarConfig(cfg){
     }
   }
   if(!cfg.usuariosCot){ cfg.usuariosCot = usuariosPorDefecto(); cambio = true; }
+  if(!cfg.extraPersonaPorNoche || typeof cfg.extraPersonaPorNoche!=='object'){ cfg.extraPersonaPorNoche = {AI:100, FB:80, BB:60}; cambio = true; }
   if(!cfg.temporadasReglas){
     // La temporada ahora sale de la regla por fechas; el calendario pintado a mano anterior se descarta.
     cfg.temporadasReglas = defaultConfig().temporadasReglas;
@@ -703,6 +704,7 @@ function hospedajeState(){
     rackTipo: Object.keys(CFG.rack)[0],
     lineas: [], // carrito: cada habitación agregada se cotiza por separado (puede haber tipos distintos)
     personasExtra: 0,
+    planPersonaExtra: '', // vacío = el plan de la habitación
     mascPeq: 0,
     mascGrande: 0,
     extrasQty: {},
@@ -962,7 +964,8 @@ function renderHospedaje(){
         <div class="card">
           <h3>Cargos adicionales</h3>
           <div class="extras-counters">
-            <div class="counter"><b>Persona extra</b><small>${money(CFG.extraPersonaPorNoche)} por noche</small><input type="number" id="h_personasExtra" min="0" value="${st.personasExtra}"></div>
+            <div class="counter"><b>Persona extra</b><small id="h_pexPrecio">${money(precioPersonaExtra(st))} por noche · ${PEX_LABEL[planPersonaExtra(st)]}</small><input type="number" id="h_personasExtra" min="0" value="${st.personasExtra}">
+              ${st.categoria==='festivo' ? '' : `<select id="h_pexPlan" style="margin-top:6px; font-size:12px;"><option value="" ${!st.planPersonaExtra?'selected':''}>Según la habitación</option>${Object.keys(PEX_LABEL).map(k=>`<option value="${k}" ${st.planPersonaExtra===k?'selected':''}>${PEX_LABEL[k]} · ${money(CFG.extraPersonaPorNoche[k])}</option>`).join('')}</select>`}</div>
             <div class="counter"><b>Mascota pequeña</b><small>${money(CFG.mascotaPorNoche.pequena)} por noche</small><input type="number" id="h_mascPeq" min="0" value="${st.mascPeq}"></div>
             <div class="counter"><b>Mascota grande</b><small>${money(CFG.mascotaPorNoche.grande)} por noche</small><input type="number" id="h_mascGrande" min="0" value="${st.mascGrande}"></div>
           </div>
@@ -1058,6 +1061,7 @@ function renderHospedaje(){
   document.getElementById('h_addLinea').onclick = ()=>{ addLineaHospedaje(st); renderLineasCard(st); computeHospedaje(); };
   if(st.categoria==='festivo') renderFestLineasCard(st); else renderLineasCard(st);
   document.getElementById('h_personasExtra').oninput = e=>{ st.personasExtra=Math.max(0,parseInt(e.target.value)||0); computeHospedaje(); };
+  if(document.getElementById('h_pexPlan')) document.getElementById('h_pexPlan').onchange = e=>{ st.planPersonaExtra=e.target.value; computeHospedaje(); };
   document.getElementById('h_mascPeq').oninput = e=>{ st.mascPeq=Math.max(0,parseInt(e.target.value)||0); computeHospedaje(); };
   document.getElementById('h_mascGrande').oninput = e=>{ st.mascGrande=Math.max(0,parseInt(e.target.value)||0); computeHospedaje(); };
   document.getElementById('h_descuento').onchange = e=>{ st.descuentoIdx=parseInt(e.target.value); computeHospedaje(); };
@@ -1190,7 +1194,8 @@ function computeHospedajeFestivo(st){
     return;
   }
 
-  const cargoPersonaExtra = st.personasExtra * CFG.extraPersonaPorNoche * noches;
+  actualizarPrecioPex(st);
+  const cargoPersonaExtra = st.personasExtra * precioPersonaExtra(st) * noches;
   const cargoMascotas = (st.mascPeq*CFG.mascotaPorNoche.pequena + st.mascGrande*CFG.mascotaPorNoche.grande) * noches;
   let cargoExtras = 0, cargoExtrasFlat = 0;
   const extrasDetalle = [];
@@ -1303,7 +1308,7 @@ function computeHospedajeFestivo(st){
   wa += `\n✨ *Tu paquete incluye*\n`;
   pack.incluye.forEach(i=>{ wa += `• ${i}\n`; });
   wa += `\n`;
-  if(cargoPersonaExtra) wa += `Personas extra: ${st.personasExtra} × ${money(CFG.extraPersonaPorNoche*tf)}/noche\n`;
+  if(cargoPersonaExtra) wa += `Personas extra: ${st.personasExtra} × ${money(precioPersonaExtra(st)*tf)}/noche (${PEX_LABEL[planPersonaExtra(st)]})\n`;
   if(cargoMascotas) wa += `Mascotas: ${money(cargoMascotas*tf)}\n`;
   extrasDetalle.forEach(ex=>{ wa += `${ex.nombre} ×${ex.qty}: ${money(ex.flat?ex.total:ex.total*tf)}\n`; });
   if(descuentoMonto>0) wa += `Descuento (${descLabel}): -${money(descuentoMonto*tf)}\n`;
@@ -1368,7 +1373,8 @@ function computeHospedaje(){
   const lineasConTotal = st.lineas.map(l=>({ linea:l, sinImp: lineaTotalSinImpuestos(st,l) }));
   const subtotalHab = lineasConTotal.reduce((s,x)=>s+x.sinImp, 0);
 
-  const cargoPersonaExtra = st.personasExtra * CFG.extraPersonaPorNoche * st.noches;
+  actualizarPrecioPex(st);
+  const cargoPersonaExtra = st.personasExtra * precioPersonaExtra(st) * st.noches;
   const cargoMascotas = (st.mascPeq*CFG.mascotaPorNoche.pequena + st.mascGrande*CFG.mascotaPorNoche.grande) * st.noches;
   let cargoExtras = 0, cargoExtrasFlat = 0;
   const extrasDetalle = [];
@@ -1563,7 +1569,7 @@ function computeHospedaje(){
     wa += `• ${linea.label} — ${sub}: ${money(sinImp*taxFactor())}\n`;
   });
   wa += `\n`;
-  if(st.personasExtra) wa += `Personas extra: ${st.personasExtra} × ${money(CFG.extraPersonaPorNoche*taxFactor())}/noche\n`;
+  if(st.personasExtra) wa += `Personas extra: ${st.personasExtra} × ${money(precioPersonaExtra(st)*taxFactor())}/noche (${PEX_LABEL[planPersonaExtra(st)]})\n`;
   if(st.mascPeq) wa += `Mascota raza pequeña: ${st.mascPeq} × ${money(CFG.mascotaPorNoche.pequena*taxFactor())}/noche\n`;
   if(st.mascGrande) wa += `Mascota raza grande: ${st.mascGrande} × ${money(CFG.mascotaPorNoche.grande*taxFactor())}/noche\n`;
   extrasDetalle.forEach(ex=>{ wa += `${ex.nombre} ×${ex.qty}: ${money(ex.flat?ex.total:ex.total*taxFactor())}\n`; });
@@ -1661,6 +1667,21 @@ function renderPoolDay(){
   computePool();
 }
 function planKeyName(plan){ return plan==='AI'?'todoIncluido':(plan==='FB'?'fullBoard':'bedBreakfast'); }
+// Persona extra: Todo Incluido $100, Full Board $80, Bed & Breakfast $60 por noche (sin impuestos).
+const PEX_LABEL = {AI:'Todo Incluido', FB:'Full Board', BB:'Bed & Breakfast'};
+function planPersonaExtra(st){
+  if(st.categoria==='festivo') return 'AI'; // los paquetes festivos son Todo Incluido
+  if(st.planPersonaExtra && PEX_LABEL[st.planPersonaExtra]) return st.planPersonaExtra;
+  const l = (st.lineas||[])[0]; return l && l.plan ? l.plan : st.plan; // automático: plan de la primera habitación
+}
+function precioPersonaExtra(st){
+  const t = CFG.extraPersonaPorNoche;
+  return (t && typeof t==='object') ? (+t[planPersonaExtra(st)]||0) : (+t||0);
+}
+function actualizarPrecioPex(st){
+  const el = document.getElementById('h_pexPrecio');
+  if(el) el.textContent = `${money(precioPersonaExtra(st))} por noche · ${PEX_LABEL[planPersonaExtra(st)]}`;
+}
 function planLabel(plan){ return plan==='AI'?'Todo Incluido':(plan==='FB'?'Alojamiento + tres comidas':'Alojamiento + desayuno'); }
 
 function buildFinanciamientoHTML(plan, total){
@@ -2895,7 +2916,7 @@ function renderCfgPoolday(body){
 
 function renderCfgExtras(body){
   let html = '<div class="card"><h3>Cargo por persona / mascota extra (Hospedaje)</h3><div class="row">';
-  html += `<div><label>Persona extra / noche</label><input type="number" step="0.01" id="cfg_pex" value="${CFG.extraPersonaPorNoche}"></div>`;
+  Object.keys(PEX_LABEL).forEach(k=>{ html += `<div><label>Persona extra / noche — ${PEX_LABEL[k]}</label><input type="number" step="0.01" class="cfg-pex" data-p="${k}" value="${CFG.extraPersonaPorNoche[k]}"></div>`; });
   html += `<div><label>Mascota pequeña / noche 🔒</label><input type="number" step="0.01" id="cfg_mpq" value="${CFG.mascotaPorNoche.pequena}" ${lockAttr(true)}></div>`;
   html += `<div><label>Mascota grande / noche 🔒</label><input type="number" step="0.01" id="cfg_mgr" value="${CFG.mascotaPorNoche.grande}" ${lockAttr(true)}></div>`;
   html += '</div></div>';
@@ -2917,7 +2938,7 @@ function renderCfgExtras(body){
   html += `</table><div class="flexend"><button class="btn secondary small" id="cfg-d-add">+ Agregar motivo de descuento</button></div></div>`;
 
   body.innerHTML = html;
-  document.getElementById('cfg_pex').onchange = e=>CFG.extraPersonaPorNoche = parseFloat(e.target.value)||0;
+  body.querySelectorAll('.cfg-pex').forEach(i=> i.onchange = e=>{ CFG.extraPersonaPorNoche[e.target.dataset.p] = parseFloat(e.target.value)||0; });
   document.getElementById('cfg_mpq').onchange = e=>CFG.mascotaPorNoche.pequena = parseFloat(e.target.value)||0;
   document.getElementById('cfg_mgr').onchange = e=>CFG.mascotaPorNoche.grande = parseFloat(e.target.value)||0;
 
@@ -3581,7 +3602,7 @@ function quoteFirma(key, st, total){
   const ext = o => JSON.stringify(Object.keys(o||{}).filter(k=>o[k]>0).sort().map(k=>[k,o[k]]));
   let fechas, habit, serv;
   if(key==='h'){
-    const comun = `${ext(st.extrasQty)}|pe${st.personasExtra}|m${st.mascPeq}/${st.mascGrande}|d${st.descuentoIdx}`;
+    const comun = `${ext(st.extrasQty)}|pe${st.personasExtra}${planPersonaExtra(st)}|m${st.mascPeq}/${st.mascGrande}|d${st.descuentoIdx}`;
     if(st.categoria==='festivo'){ fechas = `festivo|${st.festPaquete}|${st.festDuracion}`; habit = JSON.stringify((st.festLineas||[]).map(l=>l.label).sort()); serv = 'festivo|'+comun; }
     else { fechas = `${st.fecha}|${st.noches}`; habit = JSON.stringify((st.lineas||[]).map(l=>l.label+':'+(l.categoria==='rack'?0:l.ocupacion)).sort());
       serv = JSON.stringify((st.lineas||[]).map(l=>l.plan).sort())+`|promo${st.promocionManual?1:0}|`+comun; }
