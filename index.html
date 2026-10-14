@@ -303,7 +303,7 @@ function defaultConfig(){
     checkIn:'15h00', checkOut:'12h00',
     politicaHospedaje:'Esta cotización tiene una validez de 24 horas. Para confirmar la reserva se solicita el 50% de garantía (transferencia, depósito o tarjeta de crédito); el saldo se cancela al check-in. Los valores abonados no son reembolsables.',
     politicaPoolday:'Las reservas no aplican reembolso. Se permite un cambio de fecha con mínimo 24 horas de anticipación (aplica una sola vez). Para confirmar se solicita el 50% o 100% de pago previo (Payphone, depósito o transferencia).',
-    extraPersonaPorNoche: {AI:100, FB:80, BB:60}, // persona extra por noche (sin impuestos) según el plan
+    extraPersonaPorNoche: [100, 80, 60], // persona extra por noche (sin impuestos): tres valores a elegir, sin ligarse a plan ni habitación
     mascotaPorNoche: { pequena:25, grande:30 },
 
     // Pendientes solicitados por Maira (correo 29-sep-2026) — sin valores aún, no se ofrecen al cliente hasta llenarlos.
@@ -581,7 +581,7 @@ function migrarConfig(cfg){
     }
   }
   if(!cfg.usuariosCot){ cfg.usuariosCot = usuariosPorDefecto(); cambio = true; }
-  if(!cfg.extraPersonaPorNoche || typeof cfg.extraPersonaPorNoche!=='object'){ cfg.extraPersonaPorNoche = {AI:100, FB:80, BB:60}; cambio = true; }
+  if(!Array.isArray(cfg.extraPersonaPorNoche)){ const o = cfg.extraPersonaPorNoche; cfg.extraPersonaPorNoche = (o && typeof o==='object') ? [o.AI, o.FB, o.BB].map(v=>+v||0) : [100, 80, 60]; cambio = true; }
   if(!cfg.temporadasReglas){
     // La temporada ahora sale de la regla por fechas; el calendario pintado a mano anterior se descarta.
     cfg.temporadasReglas = defaultConfig().temporadasReglas;
@@ -594,7 +594,7 @@ function showToast(msg){
   const t = document.getElementById('toast');
   t.textContent = msg; t.classList.add('show');
   clearTimeout(window.__toastTimer);
-  window.__toastTimer = setTimeout(()=>t.classList.remove('show'), 2600);
+  window.__toastTimer = setTimeout(()=>t.classList.remove('show'), 4800);
 }
 
 /* ============================= FECHAS Y FERIADOS ============================= */
@@ -703,8 +703,7 @@ function hospedajeState(){
     ninos: 0,
     rackTipo: Object.keys(CFG.rack)[0],
     lineas: [], // carrito: cada habitación agregada se cotiza por separado (puede haber tipos distintos)
-    personasExtra: 0,
-    planPersonaExtra: '', // vacío = el plan de la habitación
+    pex: [0,0,0], // personas extra por cada uno de los tres valores
     mascPeq: 0,
     mascGrande: 0,
     extrasQty: {},
@@ -964,8 +963,7 @@ function renderHospedaje(){
         <div class="card">
           <h3>Cargos adicionales</h3>
           <div class="extras-counters">
-            <div class="counter"><b>Persona extra</b><small id="h_pexPrecio">${money(precioPersonaExtra(st))} por noche · ${PEX_LABEL[planPersonaExtra(st)]}</small><input type="number" id="h_personasExtra" min="0" value="${st.personasExtra}">
-              ${st.categoria==='festivo' ? '' : `<select id="h_pexPlan" style="margin-top:6px; font-size:12px;"><option value="" ${!st.planPersonaExtra?'selected':''}>Según la habitación</option>${Object.keys(PEX_LABEL).map(k=>`<option value="${k}" ${st.planPersonaExtra===k?'selected':''}>${PEX_LABEL[k]} · ${money(CFG.extraPersonaPorNoche[k])}</option>`).join('')}</select>`}</div>
+            ${pexValores().map((v,i)=>`<div class="counter"><b>Persona extra · ${money(v)}</b><small>${money(v)} por noche</small><input type="number" id="h_pex${i}" min="0" value="${pexCantidades(st)[i]}"></div>`).join('\n            ')}
             <div class="counter"><b>Mascota pequeña</b><small>${money(CFG.mascotaPorNoche.pequena)} por noche</small><input type="number" id="h_mascPeq" min="0" value="${st.mascPeq}"></div>
             <div class="counter"><b>Mascota grande</b><small>${money(CFG.mascotaPorNoche.grande)} por noche</small><input type="number" id="h_mascGrande" min="0" value="${st.mascGrande}"></div>
           </div>
@@ -991,7 +989,7 @@ function renderHospedaje(){
             <button class="btn gold" id="h_pdf">📄 Descargar PDF</button>
             <button class="btn secondary" id="h_img">🖼️ Descargar imagen</button>
           </div>
-          <div class="small-note">El PDF se genera con el diálogo de impresión: elige "Guardar como PDF" como destino.</div>
+          <div class="small-note">El PDF y la imagen se descargan directamente. Cada cotización que descargas o copias queda guardada con su folio.</div>
           <label style="margin-top:16px;">Texto para WhatsApp</label>
           <textarea class="wa" id="h_waText" readonly></textarea>
           <div class="flexend">
@@ -1038,7 +1036,7 @@ function renderHospedaje(){
     }).join('')}</div>`).join('');
 
   // listeners
-  document.getElementById('h_tel').oninput = e=>{ st.telefono=e.target.value; renderQuoteBar('h'); };
+  document.getElementById('h_tel').oninput = e=>{ st.telefono=e.target.value; e.target.style.borderColor=''; if(normTel(e.target.value).length>=8) avisoCotizacion('h',''); renderQuoteBar('h'); };
   document.getElementById('h_cliente').oninput = e=>{ st.clienteNombre=limpiarTxt(e.target.value); computeHospedaje(); renderQuoteBar('h'); };
   document.getElementById('h_fecha').onchange = e=>{ st.fecha=e.target.value; computeHospedaje(); };
   document.getElementById('h_noches').oninput = e=>{ st.noches=Math.max(1,parseInt(e.target.value)||1); computeHospedaje(); };
@@ -1060,15 +1058,14 @@ function renderHospedaje(){
   }
   document.getElementById('h_addLinea').onclick = ()=>{ addLineaHospedaje(st); renderLineasCard(st); computeHospedaje(); };
   if(st.categoria==='festivo') renderFestLineasCard(st); else renderLineasCard(st);
-  document.getElementById('h_personasExtra').oninput = e=>{ st.personasExtra=Math.max(0,parseInt(e.target.value)||0); computeHospedaje(); };
-  if(document.getElementById('h_pexPlan')) document.getElementById('h_pexPlan').onchange = e=>{ st.planPersonaExtra=e.target.value; computeHospedaje(); };
+  [0,1,2].forEach(i=>{ document.getElementById('h_pex'+i).oninput = e=>{ st.pex = pexCantidades(st); st.pex[i] = Math.max(0, parseInt(e.target.value)||0); computeHospedaje(); }; });
   document.getElementById('h_mascPeq').oninput = e=>{ st.mascPeq=Math.max(0,parseInt(e.target.value)||0); computeHospedaje(); };
   document.getElementById('h_mascGrande').oninput = e=>{ st.mascGrande=Math.max(0,parseInt(e.target.value)||0); computeHospedaje(); };
   document.getElementById('h_descuento').onchange = e=>{ st.descuentoIdx=parseInt(e.target.value); computeHospedaje(); };
   document.getElementById('h_toggleImp').onclick = ()=>{ st.mostrarSinImp=!st.mostrarSinImp; renderHospedaje(); computeHospedaje(); };
-  document.getElementById('h_copy').onclick = async ()=>{ if(!(await guardarCotizacion('h',{silent:true}))) return; copyText('h_waText'); };
-  document.getElementById('h_pdf').onclick = async (e)=>{ const btn = e.currentTarget; if(!(await guardarCotizacion('h',{silent:true}))) return; downloadQuotePDF(window.__blocksHospedaje, 'cotizacion-hospedaje.pdf', btn); };
-  document.getElementById('h_img').onclick = async (e)=>{ const btn = e.currentTarget; if(!(await guardarCotizacion('h',{silent:true}))) return; downloadQuoteImage(window.__blocksHospedaje, 'cotizacion-hospedaje.jpg', btn); };
+  document.getElementById('h_copy').onclick = async ()=>{ if(!(await entregarCotizacion('h'))) return; copyText('h_waText'); };
+  document.getElementById('h_pdf').onclick = async (e)=>{ const btn = e.currentTarget; if(!(await entregarCotizacion('h'))) return; downloadQuotePDF(window.__blocksHospedaje, 'cotizacion-hospedaje.pdf', btn); };
+  document.getElementById('h_img').onclick = async (e)=>{ const btn = e.currentTarget; if(!(await entregarCotizacion('h'))) return; downloadQuoteImage(window.__blocksHospedaje, 'cotizacion-hospedaje.jpg', btn); };
 
   if(st.categoria!=='festivo'){
     document.getElementById('h_ocupacion').onchange = e=>{ st.ocupacion=parseInt(e.target.value); computeHospedaje(); };
@@ -1194,8 +1191,7 @@ function computeHospedajeFestivo(st){
     return;
   }
 
-  actualizarPrecioPex(st);
-  const cargoPersonaExtra = st.personasExtra * precioPersonaExtra(st) * noches;
+  const cargoPersonaExtra = pexPorNoche(st) * noches;
   const cargoMascotas = (st.mascPeq*CFG.mascotaPorNoche.pequena + st.mascGrande*CFG.mascotaPorNoche.grande) * noches;
   let cargoExtras = 0, cargoExtrasFlat = 0;
   const extrasDetalle = [];
@@ -1308,7 +1304,7 @@ function computeHospedajeFestivo(st){
   wa += `\n✨ *Tu paquete incluye*\n`;
   pack.incluye.forEach(i=>{ wa += `• ${i}\n`; });
   wa += `\n`;
-  if(cargoPersonaExtra) wa += `Personas extra: ${st.personasExtra} × ${money(precioPersonaExtra(st)*tf)}/noche (${PEX_LABEL[planPersonaExtra(st)]})\n`;
+  if(cargoPersonaExtra) wa += pexTextoWa(st, tf);
   if(cargoMascotas) wa += `Mascotas: ${money(cargoMascotas*tf)}\n`;
   extrasDetalle.forEach(ex=>{ wa += `${ex.nombre} ×${ex.qty}: ${money(ex.flat?ex.total:ex.total*tf)}\n`; });
   if(descuentoMonto>0) wa += `Descuento (${descLabel}): -${money(descuentoMonto*tf)}\n`;
@@ -1373,8 +1369,7 @@ function computeHospedaje(){
   const lineasConTotal = st.lineas.map(l=>({ linea:l, sinImp: lineaTotalSinImpuestos(st,l) }));
   const subtotalHab = lineasConTotal.reduce((s,x)=>s+x.sinImp, 0);
 
-  actualizarPrecioPex(st);
-  const cargoPersonaExtra = st.personasExtra * precioPersonaExtra(st) * st.noches;
+  const cargoPersonaExtra = pexPorNoche(st) * st.noches;
   const cargoMascotas = (st.mascPeq*CFG.mascotaPorNoche.pequena + st.mascGrande*CFG.mascotaPorNoche.grande) * st.noches;
   let cargoExtras = 0, cargoExtrasFlat = 0;
   const extrasDetalle = [];
@@ -1569,7 +1564,7 @@ function computeHospedaje(){
     wa += `• ${linea.label} — ${sub}: ${money(sinImp*taxFactor())}\n`;
   });
   wa += `\n`;
-  if(st.personasExtra) wa += `Personas extra: ${st.personasExtra} × ${money(precioPersonaExtra(st)*taxFactor())}/noche (${PEX_LABEL[planPersonaExtra(st)]})\n`;
+  if(pexPorNoche(st)) wa += pexTextoWa(st, taxFactor());
   if(st.mascPeq) wa += `Mascota raza pequeña: ${st.mascPeq} × ${money(CFG.mascotaPorNoche.pequena*taxFactor())}/noche\n`;
   if(st.mascGrande) wa += `Mascota raza grande: ${st.mascGrande} × ${money(CFG.mascotaPorNoche.grande*taxFactor())}/noche\n`;
   extrasDetalle.forEach(ex=>{ wa += `${ex.nombre} ×${ex.qty}: ${money(ex.flat?ex.total:ex.total*taxFactor())}\n`; });
@@ -1645,14 +1640,14 @@ function renderPoolDay(){
           <button class="btn gold" id="p_pdf">📄 Descargar PDF</button>
           <button class="btn secondary" id="p_img">🖼️ Descargar imagen</button>
         </div>
-        <div class="small-note">El PDF se genera con el diálogo de impresión: elige "Guardar como PDF" como destino.</div>
+        <div class="small-note">El PDF y la imagen se descargan directamente. Cada cotización que descargas o copias queda guardada con su folio.</div>
         <label style="margin-top:16px;">Texto para WhatsApp</label>
         <textarea class="wa" id="p_waText" readonly></textarea>
         <div class="flexend"><button class="btn gold" id="p_copy">Copiar texto</button></div>
       </div>
     </div>
   `;
-  document.getElementById('p_tel').oninput = e=>{ st.telefono=e.target.value; renderQuoteBar('p'); };
+  document.getElementById('p_tel').oninput = e=>{ st.telefono=e.target.value; e.target.style.borderColor=''; if(normTel(e.target.value).length>=8) avisoCotizacion('p',''); renderQuoteBar('p'); };
   document.getElementById('p_cliente').oninput = e=>{ st.clienteNombre=limpiarTxt(e.target.value); computePool(); renderQuoteBar('p'); };
   document.getElementById('p_fecha').onchange = e=>{ st.fecha=e.target.value; computePool(); };
   document.getElementById('p_tipo').onchange = e=>{ st.tipo=e.target.value; computePool(); };
@@ -1661,27 +1656,18 @@ function renderPoolDay(){
   document.getElementById('p_ninos').oninput = e=>{ st.ninos=Math.max(0,parseInt(e.target.value)||0); computePool(); };
   document.getElementById('p_mascPeq').oninput = e=>{ st.mascPeq=Math.max(0,parseInt(e.target.value)||0); computePool(); };
   document.getElementById('p_mascGrande').oninput = e=>{ st.mascGrande=Math.max(0,parseInt(e.target.value)||0); computePool(); };
-  document.getElementById('p_copy').onclick = async ()=>{ if(!(await guardarCotizacion('p',{silent:true}))) return; copyText('p_waText'); };
-  document.getElementById('p_pdf').onclick = async (e)=>{ const btn = e.currentTarget; if(!(await guardarCotizacion('p',{silent:true}))) return; downloadQuotePDF(window.__blocksPoolday, 'cotizacion-poolday.pdf', btn); };
-  document.getElementById('p_img').onclick = async (e)=>{ const btn = e.currentTarget; if(!(await guardarCotizacion('p',{silent:true}))) return; downloadQuoteImage(window.__blocksPoolday, 'cotizacion-poolday.jpg', btn); };
+  document.getElementById('p_copy').onclick = async ()=>{ if(!(await entregarCotizacion('p'))) return; copyText('p_waText'); };
+  document.getElementById('p_pdf').onclick = async (e)=>{ const btn = e.currentTarget; if(!(await entregarCotizacion('p'))) return; downloadQuotePDF(window.__blocksPoolday, 'cotizacion-poolday.pdf', btn); };
+  document.getElementById('p_img').onclick = async (e)=>{ const btn = e.currentTarget; if(!(await entregarCotizacion('p'))) return; downloadQuoteImage(window.__blocksPoolday, 'cotizacion-poolday.jpg', btn); };
   computePool();
 }
 function planKeyName(plan){ return plan==='AI'?'todoIncluido':(plan==='FB'?'fullBoard':'bedBreakfast'); }
-// Persona extra: Todo Incluido $100, Full Board $80, Bed & Breakfast $60 por noche (sin impuestos).
-const PEX_LABEL = {AI:'Todo Incluido', FB:'Full Board', BB:'Bed & Breakfast'};
-function planPersonaExtra(st){
-  if(st.categoria==='festivo') return 'AI'; // los paquetes festivos son Todo Incluido
-  if(st.planPersonaExtra && PEX_LABEL[st.planPersonaExtra]) return st.planPersonaExtra;
-  const l = (st.lineas||[])[0]; return l && l.plan ? l.plan : st.plan; // automático: plan de la primera habitación
-}
-function precioPersonaExtra(st){
-  const t = CFG.extraPersonaPorNoche;
-  return (t && typeof t==='object') ? (+t[planPersonaExtra(st)]||0) : (+t||0);
-}
-function actualizarPrecioPex(st){
-  const el = document.getElementById('h_pexPrecio');
-  if(el) el.textContent = `${money(precioPersonaExtra(st))} por noche · ${PEX_LABEL[planPersonaExtra(st)]}`;
-}
+// Persona extra: tres valores por noche (sin impuestos), por defecto $100, $80 y $60. No dependen del plan ni de la habitación:
+// la persona que cotiza elige cuántas personas extra van a cada valor.
+function pexValores(){ const t = CFG.extraPersonaPorNoche; return Array.isArray(t) ? [0,1,2].map(i=>+t[i]||0) : [100, 80, 60]; }
+function pexCantidades(st){ const q = st.pex || [0,0,0]; return [0,1,2].map(i=>Math.max(0, parseInt(q[i])||0)); }
+function pexPorNoche(st){ const v = pexValores(); return pexCantidades(st).reduce((s,n,i)=>s+n*v[i], 0); }
+function pexTextoWa(st, tf){ const v = pexValores(); return pexCantidades(st).map((n,i)=> n ? `Personas extra: ${n} × ${money(v[i]*tf)}/noche\n` : '').join(''); }
 function planLabel(plan){ return plan==='AI'?'Todo Incluido':(plan==='FB'?'Alojamiento + tres comidas':'Alojamiento + desayuno'); }
 
 function buildFinanciamientoHTML(plan, total){
@@ -2916,7 +2902,7 @@ function renderCfgPoolday(body){
 
 function renderCfgExtras(body){
   let html = '<div class="card"><h3>Cargo por persona / mascota extra (Hospedaje)</h3><div class="row">';
-  Object.keys(PEX_LABEL).forEach(k=>{ html += `<div><label>Persona extra / noche — ${PEX_LABEL[k]}</label><input type="number" step="0.01" class="cfg-pex" data-p="${k}" value="${CFG.extraPersonaPorNoche[k]}"></div>`; });
+  pexValores().forEach((v,i)=>{ html += `<div><label>Persona extra / noche — valor ${i+1}</label><input type="number" step="0.01" class="cfg-pex" data-i="${i}" value="${v}"></div>`; });
   html += `<div><label>Mascota pequeña / noche 🔒</label><input type="number" step="0.01" id="cfg_mpq" value="${CFG.mascotaPorNoche.pequena}" ${lockAttr(true)}></div>`;
   html += `<div><label>Mascota grande / noche 🔒</label><input type="number" step="0.01" id="cfg_mgr" value="${CFG.mascotaPorNoche.grande}" ${lockAttr(true)}></div>`;
   html += '</div></div>';
@@ -2938,7 +2924,7 @@ function renderCfgExtras(body){
   html += `</table><div class="flexend"><button class="btn secondary small" id="cfg-d-add">+ Agregar motivo de descuento</button></div></div>`;
 
   body.innerHTML = html;
-  body.querySelectorAll('.cfg-pex').forEach(i=> i.onchange = e=>{ CFG.extraPersonaPorNoche[e.target.dataset.p] = parseFloat(e.target.value)||0; });
+  body.querySelectorAll('.cfg-pex').forEach(i=> i.onchange = e=>{ const v = pexValores(); v[+e.target.dataset.i] = parseFloat(e.target.value)||0; CFG.extraPersonaPorNoche = v; });
   document.getElementById('cfg_mpq').onchange = e=>CFG.mascotaPorNoche.pequena = parseFloat(e.target.value)||0;
   document.getElementById('cfg_mgr').onchange = e=>CFG.mascotaPorNoche.grande = parseFloat(e.target.value)||0;
 
@@ -3060,15 +3046,15 @@ function renderDiurno(){
       </div>
     </div>
   `;
-  document.getElementById('d_tel').oninput = e=>{ st.telefono=e.target.value; renderQuoteBar('d'); };
+  document.getElementById('d_tel').oninput = e=>{ st.telefono=e.target.value; e.target.style.borderColor=''; if(normTel(e.target.value).length>=8) avisoCotizacion('d',''); renderQuoteBar('d'); };
   document.getElementById('d_cliente').oninput = e=>{ st.clienteNombre=limpiarTxt(e.target.value); computeDiurno(); renderQuoteBar('d'); };
   document.getElementById('d_fecha').onchange = e=>{ st.fecha=e.target.value; computeDiurno(); };
   document.getElementById('d_personas').onchange = e=>{ st.personas=e.target.value; computeDiurno(); };
   document.getElementById('d_unidades').oninput = e=>{ st.unidades=Math.max(1,parseInt(e.target.value)||1); computeDiurno(); };
   document.getElementById('d_descuento').onchange = e=>{ st.descuentoIdx=parseInt(e.target.value); computeDiurno(); };
-  document.getElementById('d_copy').onclick = async ()=>{ if(!(await guardarCotizacion('d',{silent:true}))) return; copyText('d_waText'); };
-  document.getElementById('d_pdf').onclick = async (e)=>{ const btn = e.currentTarget; if(!(await guardarCotizacion('d',{silent:true}))) return; downloadQuotePDF(window.__blocksDiurno, 'cotizacion-dayuse.pdf', btn); };
-  document.getElementById('d_img').onclick = async (e)=>{ const btn = e.currentTarget; if(!(await guardarCotizacion('d',{silent:true}))) return; downloadQuoteImage(window.__blocksDiurno, 'cotizacion-dayuse.jpg', btn); };
+  document.getElementById('d_copy').onclick = async ()=>{ if(!(await entregarCotizacion('d'))) return; copyText('d_waText'); };
+  document.getElementById('d_pdf').onclick = async (e)=>{ const btn = e.currentTarget; if(!(await entregarCotizacion('d'))) return; downloadQuotePDF(window.__blocksDiurno, 'cotizacion-dayuse.pdf', btn); };
+  document.getElementById('d_img').onclick = async (e)=>{ const btn = e.currentTarget; if(!(await entregarCotizacion('d'))) return; downloadQuoteImage(window.__blocksDiurno, 'cotizacion-dayuse.jpg', btn); };
   computeDiurno();
 }
 function computeDiurno(){
@@ -3208,15 +3194,15 @@ function renderEventos(){
       </div>
     </div>
   `;
-  document.getElementById('e_tel').oninput = e=>{ st.telefono=e.target.value; renderQuoteBar('e'); };
+  document.getElementById('e_tel').oninput = e=>{ st.telefono=e.target.value; e.target.style.borderColor=''; if(normTel(e.target.value).length>=8) avisoCotizacion('e',''); renderQuoteBar('e'); };
   document.getElementById('e_cliente').oninput = e=>{ st.clienteNombre=limpiarTxt(e.target.value); computeEventos(); renderQuoteBar('e'); };
   document.getElementById('e_evento').onchange = e=>{ st.evento=e.target.value; renderEventos(); };
   document.getElementById('e_adultos').oninput = e=>{ st.adultos=Math.max(0,parseInt(e.target.value)||0); computeEventos(); };
   document.getElementById('e_ninos').oninput = e=>{ st.ninos=Math.max(0,parseInt(e.target.value)||0); computeEventos(); };
   document.getElementById('e_infantes').oninput = e=>{ st.infantes=Math.max(0,parseInt(e.target.value)||0); computeEventos(); };
-  document.getElementById('e_copy').onclick = async ()=>{ if(!(await guardarCotizacion('e',{silent:true}))) return; copyText('e_waText'); };
-  document.getElementById('e_pdf').onclick = async (e)=>{ const btn = e.currentTarget; if(!(await guardarCotizacion('e',{silent:true}))) return; downloadQuotePDF(window.__blocksEventos, 'cotizacion-evento.pdf', btn); };
-  document.getElementById('e_img').onclick = async (e)=>{ const btn = e.currentTarget; if(!(await guardarCotizacion('e',{silent:true}))) return; downloadQuoteImage(window.__blocksEventos, 'cotizacion-evento.jpg', btn); };
+  document.getElementById('e_copy').onclick = async ()=>{ if(!(await entregarCotizacion('e'))) return; copyText('e_waText'); };
+  document.getElementById('e_pdf').onclick = async (e)=>{ const btn = e.currentTarget; if(!(await entregarCotizacion('e'))) return; downloadQuotePDF(window.__blocksEventos, 'cotizacion-evento.pdf', btn); };
+  document.getElementById('e_img').onclick = async (e)=>{ const btn = e.currentTarget; if(!(await entregarCotizacion('e'))) return; downloadQuoteImage(window.__blocksEventos, 'cotizacion-evento.jpg', btn); };
   if(st.evento==='finDeAno'){
     document.getElementById('e_fdaOpcion').onchange = e=>{ st.finDeAnoOpcion=e.target.value; computeEventos(); };
   }
@@ -3602,7 +3588,7 @@ function quoteFirma(key, st, total){
   const ext = o => JSON.stringify(Object.keys(o||{}).filter(k=>o[k]>0).sort().map(k=>[k,o[k]]));
   let fechas, habit, serv;
   if(key==='h'){
-    const comun = `${ext(st.extrasQty)}|pe${st.personasExtra}${planPersonaExtra(st)}|m${st.mascPeq}/${st.mascGrande}|d${st.descuentoIdx}`;
+    const comun = `${ext(st.extrasQty)}|pe${pexCantidades(st).join('-')}|m${st.mascPeq}/${st.mascGrande}|d${st.descuentoIdx}`;
     if(st.categoria==='festivo'){ fechas = `festivo|${st.festPaquete}|${st.festDuracion}`; habit = JSON.stringify((st.festLineas||[]).map(l=>l.label).sort()); serv = 'festivo|'+comun; }
     else { fechas = `${st.fecha}|${st.noches}`; habit = JSON.stringify((st.lineas||[]).map(l=>l.label+':'+(l.categoria==='rack'?0:l.ocupacion)).sort());
       serv = JSON.stringify((st.lineas||[]).map(l=>l.plan).sort())+`|promo${st.promocionManual?1:0}|`+comun; }
@@ -3613,16 +3599,34 @@ function quoteFirma(key, st, total){
 }
 function diffFirma(a, b){ return ['precio','fechas','habitaciones','servicio'].filter(k=>a[k]!==b[k]); }
 function snapshotDe(st){ return JSON.parse(JSON.stringify(st, (k,v)=> k==='img' ? undefined : v)); }
+// Mensaje visible bajo el cliente (rojo) cuando falta algo para guardar o descargar; se borra solo al guardar.
+function avisoCotizacion(key, msg, resaltarTel){
+  const bar = document.getElementById('qbar_'+key); if(!bar) return;
+  let el = document.getElementById('qerr_'+key);
+  if(!msg){ if(el) el.remove(); const t0 = document.getElementById(key+'_tel'); if(t0) t0.style.borderColor = ''; return; }
+  if(!el){ el = document.createElement('div'); el.id = 'qerr_'+key; el.className = 'warn danger'; el.style.marginTop = '8px'; bar.appendChild(el); }
+  el.textContent = msg;
+  const t = document.getElementById(key+'_tel');
+  if(resaltarTel && t){ t.style.borderColor = '#C20F2F'; t.focus(); try{ t.scrollIntoView({block:'center', behavior:'smooth'}); }catch(e){} }
+  else bar.scrollIntoView({block:'center', behavior:'smooth'});
+}
+// Antes de descargar o copiar: guarda la cotización. Si SharePoint falla (no por datos faltantes), ofrece descargarla igual.
+async function entregarCotizacion(key){
+  if(await guardarCotizacion(key, {silent:true})) return true;
+  if(window.__fallaGuardado) return confirm('No se pudo registrar la cotización en SharePoint ('+window.__fallaGuardado+').\n\n¿Descargarla de todas formas? No quedará en el historial ni en el índice de ajustes.');
+  return false;
+}
 async function guardarCotizacion(key, opts){
-  opts = opts || {}; const T = TAB[key]; const st = T.state();
+  opts = opts || {}; const T = TAB[key]; const st = T.state(); window.__fallaGuardado = null;
   if(!CURRENT_USER){ showToast('Inicia sesión para guardar'); return null; }
   T.compute();
   const blocks = T.blocks();
-  if(!blocks){ showToast('Completa la cotización antes de guardarla'); return null; }
+  if(!blocks){ avisoCotizacion(key, 'Completa la cotización (habitación, fechas o personas) antes de guardarla o descargarla.'); return null; }
   const tel = normTel(st.telefono);
-  if(tel.length<8){ showToast('Falta el teléfono / WhatsApp del cliente: con él llevamos el índice de ajustes'); const i = document.getElementById(key+'_tel'); if(i) i.focus(); return null; }
+  if(tel.length<8){ avisoCotizacion(key, 'Falta el teléfono / WhatsApp del cliente. Escríbelo en el campo de arriba para poder guardar y descargar: con él llevamos el índice de ajustes.', true); return null; }
+  avisoCotizacion(key, '');
   const total = totalFromBlocks(blocks); const firma = quoteFirma(key, st, total); const cliente = limpiarTxt(st.clienteNombre).trim();
-  await cargarCotizaciones(true);
+  if(!(await cargarCotizaciones(true))){ window.__fallaGuardado = 'no se pudo leer la lista de cotizaciones'; return null; }
   const prev = st.folioGuardado ? ultimaVersion(st.folioGuardado) : null;
   if(prev){
     const cambios = diffFirma(prev.firma, firma);
@@ -3636,7 +3640,7 @@ async function guardarCotizacion(key, opts){
   const rec = {id:gid(), folio, version: prev ? prev.version+1 : 1, tipo: T.tipo, tipoClave:key, enPaquete:(key==='h' && st.categoria==='festivo'),
     cliente, telefono:tel, telefonoRaw:st.telefono.trim(), usuario:{id:CURRENT_USER.id, nombre:CURRENT_USER.nombre},
     fecha:nowISO(), total, firma, ajusteTipos: prev ? diffFirma(prev.firma, firma) : [], estado:'Guardada', snapshot:snapshotDe(st)};
-  try{ await Store.writeQuote(rec); }catch(e){ showToast('No se pudo guardar en SharePoint: '+e.message); return null; }
+  try{ await Store.writeQuote(rec); }catch(e){ window.__fallaGuardado = e.message || 'error desconocido'; showToast('No se pudo guardar en SharePoint: '+(e.message||e)); return null; }
   if(!prev){
     // Dos personas pudieron tomar el mismo número a la vez: la segunda toma el siguiente.
     await cargarCotizaciones(true);
@@ -3676,6 +3680,7 @@ function abrirCotizacion(folio){
   const key = v.tipoClave, T = TAB[key];
   const st = JSON.parse(JSON.stringify(v.snapshot));
   if(st.lineas) st.lineas.forEach(l=>{ l.img = roomPhotoFor(l.label); });
+  if(!st.pex) st.pex = [0, parseInt(st.personasExtra)||0, 0]; // formato anterior: un solo contador
   st.clienteNombre = limpiarTxt(v.cliente); st.telefono = v.telefonoRaw || v.telefono;
   st.folio = v.folio; st.folioGuardado = v.folio; st.version = v.version;
   window[T.v] = st; T.render();
