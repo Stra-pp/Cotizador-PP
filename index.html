@@ -2546,7 +2546,7 @@ function renderConfig(){
       <button data-sub="marca" class="${configSubtab==='marca'?'active':''}">Marca y ventas</button>
       <button data-sub="especiales" class="${configSubtab==='especiales'?'active':''}">Day Use y Eventos</button>
       <button data-sub="calendario" class="${configSubtab==='calendario'?'active':''}">Calendario de temporadas</button>
-      <button data-sub="usuarios" class="${configSubtab==='usuarios'?'active':''}">Usuarios y accesos</button>
+      ${esDevU(CURRENT_USER) ? `<button data-sub="usuarios" class="${configSubtab==='usuarios'?'active':''}">Usuarios y accesos</button>` : ''}
     </div>
     <div id="cfgBody"></div>
     <div class="savebar">
@@ -3476,7 +3476,7 @@ const verTodo = u => !!u && (u.rol==='desarrollador' || u.rol==='aprobadora');
 const puedeConfig = u => verTodo(u);
 function usuariosPorDefecto(){
   return [
-    {id:'u-dev', nombre:'Desarrollador', rol:'desarrollador', activo:true, pinHash:''},
+    {id:'u-dev', nombre:'Desarrollador', rol:'desarrollador', activo:true, pinHash:'', pinProvisional:false},
     {id:'u-maira', nombre:'Maira Suarez', rol:'aprobadora', activo:true, pinHash:''},
     {id:'u-ariana', nombre:'Ariana V.', rol:'colaborador', activo:true, pinHash:''},
     {id:'u-sheila', nombre:'Sheila B.', rol:'colaborador', activo:true, pinHash:''},
@@ -3501,7 +3501,7 @@ function verificarPin(u, pin){
   if(!pin) return {ok:false, msg:'Escribe tu PIN'};
   if(u.pinHash) return hashPin(pin)===u.pinHash ? {ok:true} : {ok:false, msg:'PIN incorrecto'};
   if(u.rol==='desarrollador'){ const d = PADRON.find(p=>p.rol==='desarrollador' && p.pin && p.pin===pin); return d ? {ok:true} : {ok:false, msg:'PIN incorrecto'}; }
-  return {ok:false, msg:'Todavía no tienes PIN. Pídeselo a Maira o al desarrollador.'};
+  return {ok:false, msg:'Todavía no tienes PIN. Pídeselo al desarrollador.'};
 }
 function iniciarSesion(u){
   CURRENT_USER = u; try{ sessionStorage.setItem('cot_user', u.id); }catch(e){}
@@ -3515,8 +3515,9 @@ function aplicarRol(){
   const tabCfg = document.querySelector('.tab-btn[data-tab="config"]'); if(tabCfg) tabCfg.style.display = puedeConfig(u) ? '' : 'none';
   const tabH = document.querySelector('.tab-btn[data-tab="historial"]'); if(tabH) tabH.textContent = verTodo(u) ? 'Cotizaciones' : 'Mis cotizaciones';
   const chip = document.getElementById('userChip');
-  if(chip) chip.innerHTML = u ? `<span><b>${esc(u.nombre)}</b> · ${ROL_LABEL[u.rol]||u.rol}</span> <button type="button" class="tab-btn" id="btnSalir">Salir</button>` : '';
+  if(chip) chip.innerHTML = u ? `<span><b>${esc(u.nombre)}</b> · ${ROL_LABEL[u.rol]||u.rol}</span> <button type="button" class="tab-btn" id="btnPin">Cambiar PIN</button> <button type="button" class="tab-btn" id="btnSalir">Salir</button>` : '';
   const salir = document.getElementById('btnSalir'); if(salir) salir.onclick = cerrarSesion;
+  const bpin = document.getElementById('btnPin'); if(bpin) bpin.onclick = ()=>mostrarCambioPin(CURRENT_USER, false);
   document.getElementById('demoBanner').hidden = !DEMO;
 }
 let LOGIN_FALLOS = 0, LOGIN_BLOQUEO = 0;
@@ -3536,7 +3537,7 @@ function showLogin(step, msg){
       <label>PIN</label><input type="password" id="lg_pin" inputmode="numeric" maxlength="8" autocomplete="off">
       <div class="warn danger" id="lg_err" hidden style="margin-top:10px;"></div>
       <button class="btn" id="lg_go" style="width:100%; margin-top:14px;">Entrar</button>
-      <div class="small-note" style="margin-top:10px;">Si no tienes PIN o lo olvidaste, pídeselo a Maira.</div>`;
+      <div class="small-note" style="margin-top:10px;">Si no tienes PIN o lo olvidaste, pídeselo al desarrollador.</div>`;
   }
   ov.innerHTML = `<div class="login-card"><img src="${BLOB.logo}" alt="Playa Paraíso" style="height:46px; margin-bottom:6px;">
     <h2 style="margin:6px 0 14px;">Cotizador interno</h2>${body}</div>`;
@@ -3548,7 +3549,7 @@ function showLogin(step, msg){
     const entrar = ()=>{
       if(Date.now() < LOGIN_BLOQUEO){ $('lg_err').hidden = false; $('lg_err').textContent = 'Demasiados intentos. Espera unos segundos.'; return; }
       const u = CFG.usuariosCot.find(x=>x.id===$('lg_user').value); const r = verificarPin(u, $('lg_pin').value.trim());
-      if(r.ok){ LOGIN_FALLOS = 0; iniciarSesion(u); }
+      if(r.ok){ LOGIN_FALLOS = 0; if(u.pinProvisional) mostrarCambioPin(u, true); else iniciarSesion(u); }
       else { LOGIN_FALLOS++; if(LOGIN_FALLOS>=5){ LOGIN_BLOQUEO = Date.now()+30000; LOGIN_FALLOS = 0; } $('lg_err').hidden = false; $('lg_err').textContent = r.msg; $('lg_pin').value = ''; }
     };
     $('lg_go').onclick = entrar; $('lg_pin').onkeydown = e=>{ if(e.key==='Enter') entrar(); };
@@ -3723,41 +3724,116 @@ function verVersiones(folio){
 }
 
 /* =============================== CONFIGURACIÓN: USUARIOS Y CONEXIÓN =============================== */
+/* ---------- PIN provisional y cambio de PIN ---------- */
+function validarPinNuevo(p){
+  if(!/^\d{4,8}$/.test(p)) return 'El PIN debe tener de 4 a 8 números';
+  if(/^(\d)\1+$/.test(p)) return 'Elige un PIN que no repita el mismo número';
+  if('0123456789'.includes(p) || '9876543210'.includes(p)) return 'Evita secuencias como 1234';
+  return '';
+}
+function generarPinProvisional(){
+  let p;
+  do{
+    let n; try{ const a = new Uint32Array(1); crypto.getRandomValues(a); n = a[0]; }catch(e){ n = Math.floor(Math.random()*4294967296); }
+    p = String(n % 1000000).padStart(6,'0');
+  }while(validarPinNuevo(p));
+  return p;
+}
+// Lee la configuración más reciente de SharePoint, aplica el cambio SOLO a la lista de usuarios y la vuelve a guardar,
+// para no pisar lo que otra persona haya guardado mientras tanto. Reintenta si no se confirma.
+async function actualizarUsuarios(fn){
+  for(let i=0;i<3;i++){
+    let base; try{ base = await Store.readConfig(); }catch(e){ base = null; }
+    if(!base) base = JSON.parse(JSON.stringify(CFG));
+    base.usuariosCot = base.usuariosCot || usuariosPorDefecto();
+    const salida = fn(base.usuariosCot);
+    try{ await Store.writeConfig(base); const check = await Store.readConfig();
+      if(check && JSON.stringify(check.usuariosCot)===JSON.stringify(base.usuariosCot)){
+        CFG.usuariosCot = base.usuariosCot;
+        if(CURRENT_USER){ const yo = CFG.usuariosCot.find(x=>x.id===CURRENT_USER.id); if(yo) CURRENT_USER = yo; }
+        return salida===undefined ? true : salida;
+      }
+    }catch(e){}
+  }
+  return false;
+}
+async function guardarMiPin(uid, pinNuevo){
+  const hash = hashPin(pinNuevo);
+  return actualizarUsuarios(lista=>{ const t = lista.find(x=>x.id===uid); if(!t) return false; t.pinHash = hash; t.pinProvisional = false; return true; });
+}
+function mostrarCambioPin(u, obligatorio){
+  let ov = document.getElementById('pinOv');
+  if(!ov){ ov = document.createElement('div'); ov.id = 'pinOv'; ov.className = 'login-ov'; ov.style.zIndex = 450; document.body.appendChild(ov); }
+  ov.innerHTML = `<div class="login-card"><img src="${BLOB.logo}" alt="Playa Paraíso" style="height:46px; margin-bottom:6px;">
+    <h2 style="margin:6px 0 8px;">${obligatorio ? 'Crea tu PIN personal' : 'Cambiar mi PIN'}</h2>
+    <p class="small-note" style="margin-top:0;">${obligatorio ? 'Entraste con un PIN provisional. Para continuar, crea uno propio: de 4 a 8 números, que no sea una secuencia.' : 'Escribe tu PIN actual y elige uno nuevo (4 a 8 números).'}</p>
+    ${obligatorio ? '' : '<label>PIN actual</label><input type="password" id="cp_act" inputmode="numeric" maxlength="8" autocomplete="off">'}
+    <label>Nuevo PIN</label><input type="password" id="cp_new" inputmode="numeric" maxlength="8" autocomplete="off">
+    <label>Repite el nuevo PIN</label><input type="password" id="cp_rep" inputmode="numeric" maxlength="8" autocomplete="off">
+    <div class="warn danger" id="cp_err" hidden style="margin-top:10px;"></div>
+    <button class="btn" id="cp_ok" style="width:100%; margin-top:14px;">Guardar PIN</button>
+    ${obligatorio ? '' : '<button class="btn secondary" id="cp_cancel" style="width:100%; margin-top:8px;">Cancelar</button>'}</div>`;
+  const $ = id => document.getElementById(id);
+  const error = m => { $('cp_err').hidden = false; $('cp_err').textContent = m; };
+  if($('cp_cancel')) $('cp_cancel').onclick = ()=>ov.remove();
+  $('cp_ok').onclick = async ()=>{
+    const nuevo = $('cp_new').value.trim(), rep = $('cp_rep').value.trim();
+    if(!obligatorio){ const r = verificarPin(u, ($('cp_act').value||'').trim()); if(!r.ok){ error('El PIN actual no es correcto'); return; } }
+    const v = validarPinNuevo(nuevo); if(v){ error(v); return; }
+    if(nuevo!==rep){ error('Los dos PIN no coinciden'); return; }
+    if(u.pinHash && hashPin(nuevo)===u.pinHash){ error('El PIN nuevo debe ser distinto al actual'); return; }
+    $('cp_ok').disabled = true; $('cp_ok').textContent = 'Guardando…';
+    const ok = await guardarMiPin(u.id, nuevo);
+    if(!ok){ $('cp_ok').disabled = false; $('cp_ok').textContent = 'Guardar PIN'; error('No se pudo guardar en SharePoint. Intenta de nuevo.'); return; }
+    ov.remove();
+    const yo = CFG.usuariosCot.find(x=>x.id===u.id);
+    if(obligatorio) iniciarSesion(yo); else showToast('PIN actualizado ✓');
+  };
+  $('cp_new').focus();
+}
+
+/* ---------- Usuarios y accesos (solo el desarrollador) ---------- */
 function renderCfgUsuarios(body){
-  const us = CFG.usuariosCot; const dev = esDevU(CURRENT_USER);
+  if(!esDevU(CURRENT_USER)){ body.innerHTML = '<div class="card"><h3>Usuarios y accesos</h3><div class="muted">Solo el desarrollador puede administrar usuarios y PIN.</div></div>'; return; }
+  const us = CFG.usuariosCot;
   const faltan = PADRON.filter(p=>p.nombre && !us.some(u=>u.nombre.toLowerCase()===String(p.nombre).toLowerCase()));
+  const estadoPin = u => u.pinHash ? (u.pinProvisional ? '<span class="tag" style="background:#fbebd7;">provisional (falta que lo cambie)</span>' : '<span class="tag">personal</span>')
+                                    : (u.rol==='desarrollador' ? '<span class="tag">usa el PIN de la app principal</span>' : '<span class="tag" style="background:#f6dde1;">sin PIN</span>');
   body.innerHTML = `
   <div class="card"><h3>Usuarios y accesos del cotizador</h3>
-    <div class="small-note">Los colaboradores ven y ajustan solo sus cotizaciones. La Aprobadora y el Desarrollador ven todo y son los únicos con acceso a Calendario & Tarifas. El PIN se guarda cifrado; para que alguien entre, asígnale uno aquí.</div>
+    <div class="small-note">Los colaboradores ven y ajustan solo sus cotizaciones. La Aprobadora y el Desarrollador ven todo y son los únicos con acceso a Calendario & Tarifas. Cada persona recibe un PIN provisional y debe cambiarlo al ingresar por primera vez. Esta pantalla es solo para el desarrollador.</div>
     <table class="tbl"><tr><th>Nombre</th><th>Rol</th><th>Activo</th><th>PIN</th><th></th></tr>
     ${us.map((u,i)=>`<tr><td>${esc(u.nombre)}</td>
-      <td><select class="cu-rol" data-i="${i}" ${dev?'':'disabled'}>${Object.keys(ROL_LABEL).map(r=>`<option value="${r}" ${u.rol===r?'selected':''}>${ROL_LABEL[r]}</option>`).join('')}</select></td>
+      <td><select class="cu-rol" data-i="${i}">${Object.keys(ROL_LABEL).map(r=>`<option value="${r}" ${u.rol===r?'selected':''}>${ROL_LABEL[r]}</option>`).join('')}</select></td>
       <td style="text-align:center;"><input type="checkbox" class="cu-act" data-i="${i}" ${u.activo!==false?'checked':''} ${(u.id===CURRENT_USER.id)?'disabled':''}></td>
-      <td>${u.pinHash?'<span class="tag">asignado</span>':'<span class="tag" style="background:#f6dde1;">sin PIN</span>'}<br><input type="password" class="cu-pin" data-i="${i}" placeholder="Nuevo PIN (4-8 números)" inputmode="numeric" maxlength="8" style="margin-top:4px;">
-        <button class="btn small secondary cu-gen" data-i="${i}" type="button">Generar</button> <button class="btn small cu-setpin" data-i="${i}" type="button">Guardar PIN</button></td>
-      <td>${(dev && u.id!==CURRENT_USER.id)?`<button class="btn danger small cu-del" data-i="${i}" type="button">Quitar</button>`:''}</td></tr>`).join('')}</table>
+      <td>${estadoPin(u)}</td>
+      <td style="white-space:nowrap;">${u.id!==CURRENT_USER.id?`<button class="btn small cu-reset" data-i="${i}" type="button">Restablecer PIN</button> <button class="btn danger small cu-del" data-i="${i}" type="button">Quitar</button>`:''}</td></tr>`).join('')}</table>
     <div class="row" style="margin-top:12px;"><div><label>Agregar persona</label><input type="text" id="cu_nuevo" placeholder="Nombre y apellido inicial"></div>
       <div style="flex:0 0 auto; align-self:flex-end;"><button class="btn" id="cu_add" type="button">Agregar como colaborador/a</button></div></div>
     ${faltan.length?`<div class="small-note" style="margin-top:12px;">Del padrón de la app principal: ${faltan.map(p=>`<button class="btn secondary small cu-imp" data-n="${esc(p.nombre)}" type="button">+ ${esc(p.nombre)}</button>`).join(' ')}</div>`:''}
     <div id="cu_pinmsg" class="warn" hidden style="margin-top:12px;"></div>
   </div>
-  ${dev?`<div class="card"><h3>Probar conexión con SharePoint</h3><div class="small-note">Revisa, paso por paso, la sesión de Microsoft, el sitio, la lista de cotizaciones, la configuración y el padrón.</div>
-    <button class="btn" id="cu_test" type="button">Probar conexión</button><pre id="cu_testout" style="white-space:pre-wrap; font-size:12px; margin-top:10px;"></pre></div>`:''}`;
-  const guardar = ()=>saveConfig();
-  body.querySelectorAll('.cu-rol').forEach(s=>s.onchange = e=>{ us[e.target.dataset.i].rol = e.target.value; guardar(); renderCfgUsuarios(body); });
-  body.querySelectorAll('.cu-act').forEach(c=>c.onchange = e=>{ us[e.target.dataset.i].activo = e.target.checked; guardar(); });
-  body.querySelectorAll('.cu-gen').forEach(b=>b.onclick = ()=>{ body.querySelector(`.cu-pin[data-i="${b.dataset.i}"]`).type = 'text'; body.querySelector(`.cu-pin[data-i="${b.dataset.i}"]`).value = String(Math.floor(1000+Math.random()*9000)); });
-  body.querySelectorAll('.cu-setpin').forEach(b=>b.onclick = ()=>{
-    const inp = body.querySelector(`.cu-pin[data-i="${b.dataset.i}"]`); const pin = inp.value.trim();
-    if(!/^\d{4,8}$/.test(pin)){ showToast('El PIN debe tener de 4 a 8 números'); return; }
-    us[b.dataset.i].pinHash = hashPin(pin); guardar();
-    const m = document.getElementById('cu_pinmsg'); m.hidden = false; m.textContent = `PIN de ${us[b.dataset.i].nombre}: ${pin} — anótalo y entrégaselo; no se vuelve a mostrar.`; inp.value = '';
-  });
-  body.querySelectorAll('.cu-del').forEach(b=>b.onclick = ()=>{ if(confirm('¿Quitar a esta persona del cotizador? Sus cotizaciones guardadas se conservan.')){ us.splice(b.dataset.i,1); guardar(); renderCfgUsuarios(body); } });
-  document.getElementById('cu_add').onclick = ()=>{ const n = limpiarTxt(document.getElementById('cu_nuevo').value).trim(); if(!n) return;
-    us.push({id:'u-'+gid(), nombre:n, rol:'colaborador', activo:true, pinHash:''}); guardar(); renderCfgUsuarios(body); };
-  body.querySelectorAll('.cu-imp').forEach(b=>b.onclick = ()=>{ us.push({id:'u-'+gid(), nombre:limpiarTxt(b.dataset.n), rol:'colaborador', activo:true, pinHash:''}); guardar(); renderCfgUsuarios(body); });
-  if(document.getElementById('cu_test')) document.getElementById('cu_test').onclick = probarConexion;
+  <div class="card"><h3>Probar conexión con SharePoint</h3><div class="small-note">Revisa, paso por paso, la sesión de Microsoft, el sitio, la lista de cotizaciones, la configuración y el padrón.</div>
+    <button class="btn" id="cu_test" type="button">Probar conexión</button><pre id="cu_testout" style="white-space:pre-wrap; font-size:12px; margin-top:10px;"></pre></div>`;
+  const refrescar = ()=>renderCfgUsuarios(body);
+  const mostrarPin = (nombre, pin)=>{ const m = document.getElementById('cu_pinmsg'); m.hidden = false; m.textContent = `PIN provisional de ${nombre}: ${pin} — entrégaselo; deberá cambiarlo al ingresar. No se vuelve a mostrar.`; };
+  body.querySelectorAll('.cu-rol').forEach(s=>s.onchange = async e=>{ const id = us[e.target.dataset.i].id, rol = e.target.value;
+    await actualizarUsuarios(l=>{ const t = l.find(x=>x.id===id); if(t) t.rol = rol; }); refrescar(); });
+  body.querySelectorAll('.cu-act').forEach(c=>c.onchange = async e=>{ const id = us[e.target.dataset.i].id, v = e.target.checked;
+    await actualizarUsuarios(l=>{ const t = l.find(x=>x.id===id); if(t) t.activo = v; }); });
+  body.querySelectorAll('.cu-reset').forEach(b=>b.onclick = async ()=>{
+    const u = us[b.dataset.i]; const pin = generarPinProvisional(); const hash = hashPin(pin);
+    const ok = await actualizarUsuarios(l=>{ const t = l.find(x=>x.id===u.id); if(!t) return false; t.pinHash = hash; t.pinProvisional = true; return true; });
+    if(!ok){ showToast('No se pudo guardar el PIN en SharePoint'); return; }
+    refrescar(); mostrarPin(u.nombre, pin); });
+  body.querySelectorAll('.cu-del').forEach(b=>b.onclick = async ()=>{ if(!confirm('¿Quitar a esta persona del cotizador? Sus cotizaciones guardadas se conservan.')) return;
+    const id = us[b.dataset.i].id; await actualizarUsuarios(l=>{ const i = l.findIndex(x=>x.id===id); if(i>=0) l.splice(i,1); }); refrescar(); });
+  const agregar = async nombre=>{ const pin = generarPinProvisional(); const hash = hashPin(pin);
+    const ok = await actualizarUsuarios(l=>{ l.push({id:'u-'+gid(), nombre, rol:'colaborador', activo:true, pinHash:hash, pinProvisional:true}); return true; });
+    if(!ok){ showToast('No se pudo guardar en SharePoint'); return; } refrescar(); mostrarPin(nombre, pin); };
+  document.getElementById('cu_add').onclick = ()=>{ const n = limpiarTxt(document.getElementById('cu_nuevo').value).trim(); if(n) agregar(n); };
+  body.querySelectorAll('.cu-imp').forEach(b=>b.onclick = ()=>agregar(limpiarTxt(b.dataset.n)));
+  document.getElementById('cu_test').onclick = probarConexion;
 }
 async function probarConexion(){
   const out = document.getElementById('cu_testout'); const L = []; const show = ()=>{ out.textContent = L.join('\n'); };
@@ -3782,7 +3858,7 @@ async function arranque(){
   try{ PADRON = await Store.readPadron(); }catch(e){ PADRON = []; }
   const guardado = (()=>{ try{ return sessionStorage.getItem('cot_user'); }catch(e){ return null; } })();
   const u = guardado && CFG.usuariosCot.find(x=>x.id===guardado && x.activo!==false);
-  if(u) iniciarSesion(u); else showLogin('pin');
+  if(u && !u.pinProvisional) iniciarSesion(u); else showLogin('pin');
 }
 
 (async function init(){
