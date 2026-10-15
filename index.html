@@ -177,6 +177,7 @@
   .extra-chip .ec-price small{display:block; font-weight:400; font-size:10.5px; opacity:.65;}
   .extra-chip input[type=checkbox]{width:auto; accent-color:var(--coral);}
   .extra-chip input[type=number]{width:58px; padding:5px 6px;}
+  .extra-chip .h_extraAll{padding:4px 8px; font-size:11px; white-space:nowrap; margin:0;}
   .lock-bar{display:flex; align-items:center; gap:10px; flex-wrap:wrap; background:#fbeff0; border:1px solid #eab9c2; border-radius:12px; padding:10px 14px; margin-bottom:14px; font-size:12.5px;}
   .lock-bar.open{background:#e6f2ea; border-color:#b9dcc6;}
   .lock-bar .grow{flex:1;}
@@ -749,6 +750,7 @@ function hospedajeState(){
     rackTipo: Object.keys(CFG.rack)[0],
     lineas: [], // carrito: cada habitación agregada se cotiza por separado (puede haber tipos distintos)
     pex: [0,0,0], // personas extra por cada uno de los tres valores
+    extrasAuto: {}, // adicionales por persona marcados con "Todos": siguen al total de personas de la cotización
     mascPeq: 0,
     mascGrande: 0,
     extrasQty: {},
@@ -918,7 +920,7 @@ function renderLineasCard(st){
     </div>`;
   }).join('');
   list.querySelectorAll('.li-remove').forEach(btn=>{
-    btn.onclick = ()=>{ removeLineaHospedaje(st, btn.dataset.id); renderLineasCard(st); computeHospedaje(); };
+    btn.onclick = ()=>{ removeLineaHospedaje(st, btn.dataset.id); renderLineasCard(st); refrescarExtrasPorPersona(st); computeHospedaje(); };
   });
 }
 
@@ -1065,7 +1067,6 @@ function renderHospedaje(){
   }
 
   // extras list
-  const headcount = Math.max(1, (st.adultos||0)+(st.ninos||0));
   const exBox = document.getElementById('h_extrasList');
   const grupos = {};
   CFG.extras.forEach((ex,i)=>{ const g = extraGrupo(ex); (grupos[g] = grupos[g] || []).push({ex,i}); });
@@ -1075,11 +1076,12 @@ function renderHospedaje(){
     <div class="extras-grid">${grupos[g].map(({ex,i})=>{
       const qty = st.extrasQty[i]||0;
       if(ex.porPersona){
-        return `<label class="extra-chip${qty>0?' on':''}">
-          <input type="checkbox" data-i="${i}" class="h_extraChk" ${qty>0?'checked':''}>
+        return `<div class="extra-chip${qty>0?' on':''}">
           <span class="ec-name">${ex.nombre}</span>
-          <span class="ec-price" id="h_extraPriceLabel_${i}">${extraPriceHtml(ex, headcount)}</span>
-        </label>`;
+          <span class="ec-price">${money(ex.precio)}<small>por persona</small></span>
+          <input type="number" min="0" data-i="${i}" class="h_extraQty" value="${qty}" aria-label="Personas">
+          ${st.categoria==='festivo' ? '' : `<button type="button" class="btn secondary small h_extraAll" data-i="${i}" title="Aplicar a todas las personas de la cotización">Todos (${personasTotalesHosp(st)})</button>`}
+        </div>`;
       }
       return `<div class="extra-chip${qty>0?' on':''}">
         <span class="ec-name">${ex.nombre}</span>
@@ -1114,7 +1116,7 @@ function renderHospedaje(){
     document.getElementById('h_festDuracion').onchange = e=>{ st.festDuracion=e.target.value; renderHospedaje(); computeHospedaje(); };
     document.getElementById('h_festAdd').onclick = ()=>{ if(addFestLinea(st)) computeHospedaje(); };
   }
-  document.getElementById('h_addLinea').onclick = ()=>{ addLineaHospedaje(st); renderLineasCard(st); computeHospedaje(); };
+  document.getElementById('h_addLinea').onclick = ()=>{ addLineaHospedaje(st); renderLineasCard(st); refrescarExtrasPorPersona(st); computeHospedaje(); };
   if(st.categoria==='festivo') renderFestLineasCard(st); else renderLineasCard(st);
   [0,1,2].forEach(i=>{ document.getElementById('h_pex'+i).oninput = e=>{ st.pex = pexCantidades(st); st.pex[i] = Math.max(0, parseInt(e.target.value)||0); computeHospedaje(); }; });
   document.getElementById('h_mascPeq').oninput = e=>{ st.mascPeq=Math.max(0,parseInt(e.target.value)||0); computeHospedaje(); };
@@ -1128,38 +1130,38 @@ function renderHospedaje(){
   if(st.categoria!=='festivo'){
     document.getElementById('h_ocupacion').onchange = e=>{ st.ocupacion=parseInt(e.target.value); computeHospedaje(); };
     document.getElementById('h_plan').onchange = e=>{ st.plan=e.target.value; computeHospedaje(); };
-    document.getElementById('h_adultos').oninput = e=>{ st.adultos=Math.max(0,parseInt(e.target.value)||0); refrescarExtrasPorPersona(st); computeHospedaje(); };
-    document.getElementById('h_ninos').oninput = e=>{ st.ninos=Math.max(0,parseInt(e.target.value)||0); refrescarExtrasPorPersona(st); computeHospedaje(); };
+    document.getElementById('h_adultos').oninput = e=>{ st.adultos=Math.max(0,parseInt(e.target.value)||0); computeHospedaje(); };
+    document.getElementById('h_ninos').oninput = e=>{ st.ninos=Math.max(0,parseInt(e.target.value)||0); computeHospedaje(); };
   }
   document.querySelectorAll('.h_extraQty').forEach(inp=>{
-    inp.oninput = e=>{ const q = Math.max(0,parseInt(e.target.value)||0); st.extrasQty[e.target.dataset.i] = q; e.target.closest('.extra-chip').classList.toggle('on', q>0); computeHospedaje(); };
+    inp.oninput = e=>{ const q = Math.max(0,parseInt(e.target.value)||0); st.extrasQty[e.target.dataset.i] = q; if(st.extrasAuto) delete st.extrasAuto[e.target.dataset.i]; e.target.closest('.extra-chip').classList.toggle('on', q>0); computeHospedaje(); };
   });
-  document.querySelectorAll('.h_extraChk').forEach(chk=>{
-    chk.onchange = e=>{
-      const i = e.target.dataset.i;
-      const hc = Math.max(1, (st.adultos||0)+(st.ninos||0));
-      st.extrasQty[i] = e.target.checked ? hc : 0;
-      const lbl = document.getElementById('h_extraPriceLabel_'+i);
-      if(lbl) lbl.innerHTML = extraPriceHtml(CFG.extras[i], hc);
-      e.target.closest('.extra-chip').classList.toggle('on', e.target.checked);
-      computeHospedaje();
-    };
+  document.querySelectorAll('.h_extraAll').forEach(btn=>{
+    btn.onclick = ()=>{ if(!personasTotalesHosp(st)){ showToast('Primero agrega las habitaciones de la cotización'); return; }
+      st.extrasAuto = st.extrasAuto || {}; st.extrasAuto[btn.dataset.i] = true; refrescarExtrasPorPersona(st); computeHospedaje(); };
   });
 
   computeHospedaje();
 }
 
-// Cuando cambian adultos/niños, los extras "por persona" ya marcados deben recalcular su cantidad
-// automáticamente (sin que el vendedor tenga que volver a marcarlos).
+// Personas de la cotización = suma de las personas de TODAS las habitaciones agregadas
+// (por ocupación en las habitaciones estándar; adultos + niños en las suites).
+function personasTotalesHosp(st){
+  if(st.categoria==='festivo') return 0;
+  return (st.lineas||[]).reduce((s,l)=> s + (l.categoria==='rack' ? Math.max(1,(l.adultos||0)+(l.ninos||0)) : (l.ocupacion||0)), 0);
+}
+// Los adicionales por persona marcados con "Todos" siguen el total de personas cuando se agregan o quitan habitaciones;
+// los que se escribieron a mano no se tocan.
 function refrescarExtrasPorPersona(st){
-  const hc = Math.max(1, (st.adultos||0)+(st.ninos||0));
+  const tot = personasTotalesHosp(st); st.extrasAuto = st.extrasAuto || {};
   CFG.extras.forEach((ex,i)=>{
-    if(ex.porPersona && (st.extrasQty[i]||0) > 0){
-      st.extrasQty[i] = hc;
-      const lbl = document.getElementById('h_extraPriceLabel_'+i);
-      if(lbl) lbl.innerHTML = extraPriceHtml(ex, hc);
+    if(ex.porPersona && st.extrasAuto[i]){
+      st.extrasQty[i] = tot;
+      const inp = document.querySelector('.h_extraQty[data-i="'+i+'"]');
+      if(inp){ inp.value = tot; const chip = inp.closest('.extra-chip'); if(chip) chip.classList.toggle('on', tot>0); }
     }
   });
+  document.querySelectorAll('.h_extraAll').forEach(b=>{ b.textContent = 'Todos ('+tot+')'; });
 }
 
 // Reutiliza las mismas reglas de tarifa (día/temporada) para cotizar un plan hipotético de comparación,
@@ -2987,7 +2989,7 @@ function renderCfgExtras(body){
   html += `<div><label>Mascota grande / noche 🔒</label><input type="number" step="0.01" id="cfg_mgr" value="${CFG.mascotaPorNoche.grande}" ${lockAttr(true)}></div>`;
   html += '</div></div>';
 
-  html += '<div class="card"><h3>Servicios extra</h3><div class="small-note" style="margin-bottom:8px;">"Por persona" = se multiplica automáticamente por adultos+niños. "Valor final" = el precio ya es lo que se cobra, no se le suma IVA/Servicio (para transporte de terceros).</div><table class="tbl"><tr><th>Nombre</th><th>Precio</th><th>Por persona</th><th>Valor final</th><th>🔒 Protegido</th><th></th></tr>';
+  html += '<div class="card"><h3>Servicios extra</h3><div class="small-note" style="margin-bottom:8px;">"Por persona" = se cobra por cada persona que lo usa (en la cotización indicas cuántas personas, o tocas "Todos" para aplicarlo a todas). "Valor final" = el precio ya es lo que se cobra, no se le suma IVA/Servicio (para transporte de terceros).</div><table class="tbl"><tr><th>Nombre</th><th>Precio</th><th>Por persona</th><th>Valor final</th><th>🔒 Protegido</th><th></th></tr>';
   CFG.extras.forEach((ex,i)=>{
     const bq = extraBloqueado(ex); const lk = lockAttr(bq);
     html += `<tr><td><input type="text" class="cfg-ex-n" data-i="${i}" value="${ex.nombre}" ${lk}></td><td><input type="number" step="0.01" class="cfg-ex-p" data-i="${i}" value="${ex.precio}" ${lk}></td><td style="text-align:center;"><input type="checkbox" class="cfg-ex-pp" data-i="${i}" ${ex.porPersona?'checked':''} ${lk}></td><td style="text-align:center;"><input type="checkbox" class="cfg-ex-flat" data-i="${i}" ${ex.flat?'checked':''} ${lk}></td><td style="text-align:center;"><input type="checkbox" class="cfg-ex-lock" data-i="${i}" ${bq?'checked':''} ${JEFATURA?'':'disabled'}></td><td><button class="btn danger small" data-del="${i}" ${lk}>Eliminar</button></td></tr>`;
@@ -3812,6 +3814,7 @@ function abrirCotizacion(folio){
   const st = JSON.parse(JSON.stringify(v.snapshot));
   if(st.lineas) st.lineas.forEach(l=>{ l.img = roomPhotoFor(l.label); });
   if(!st.pex) st.pex = [0, parseInt(st.personasExtra)||0, 0]; // formato anterior: un solo contador
+  if(!st.extrasAuto) st.extrasAuto = {}; // las cantidades de adicionales ya guardadas se respetan tal cual
   st.clienteNombre = limpiarTxt(v.cliente); st.telefono = v.telefonoRaw || v.telefono || ''; st.canal = canalDe(v); st.usuarioRed = v.usuarioRed || '';
   st.folio = v.folio; st.folioGuardado = v.folio; st.version = v.version;
   window[T.v] = st; T.render();
