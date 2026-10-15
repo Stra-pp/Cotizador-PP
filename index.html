@@ -311,7 +311,8 @@ function defaultConfig(){
     // Verificado en el correo de Maira (29-sep-2026, tabla "DAY USE ... walk in sin reserva").
     dayUse:{
       activo:true,
-      horario:'10h00 a 17h30 (check-in 10h00, check-out 18h00)',
+      horario:'10h00 – 17h30 (check-in 10h00, check-out 18h00)',
+      checkIn:'10h00', checkOut:'18h00', // ingreso y salida del Day Use (distintos a los del hospedaje)
       // Correo de Maira (29-sep-2026): qué incluye el Day Use.
       incluye:['Alojamiento en acomodación Matrimonial o Doble (según disponibilidad)','Check-in 10h00 · Check-out 18h00','Uso de instalaciones: 10h00 – 17h30','Snacks: 11h00 – 13h00 / 15h00 – 17h00','Bebidas soft y alcohólicas: 11h00 – 17h00','Almuerzo: 13h00 – 14h30'],
       nota:'Precio Regular Day Use walk-in (sin reserva). Snacks 11h00-13h00/15h00-17h00, bebidas soft/alcohólicas 11h00-17h00, almuerzo 13h00-14h30.',
@@ -403,7 +404,7 @@ function defaultConfig(){
         ultra:{adulto:70, nino:40}
       },
       mascota:{pequena:20, grande:30},
-      horarios:{regular:'10h00 a 17h30', premium:'10h00 a 20h30', ultra:'10h00 a 00h00'},
+      horarios:{regular:'10h00 – 17h30', premium:'10h00 – 20h30', ultra:'10h00 – 00h00'},
       // Horarios oficiales por modalidad (hoja POOL DAY del tarifario). Regular no incluye cena.
       incluye:{
         regular:['Uso de instalaciones: 10h00 – 17h30','Snacks: 11h00 – 13h00 / 15h00 – 17h00','Bebidas soft y alcohólicas: 11h00 – 13h00 / 15h00 – 17h00','Almuerzo: 13h00 – 14h30','No incluye servicio de cena'],
@@ -411,9 +412,9 @@ function defaultConfig(){
         ultra:['Uso de instalaciones: 10h00 – 00h00','Snacks: 11h00 – 13h00 / 15h00 – 19h00','Bebidas soft y alcohólicas: 11h00 – 13h00 / 15h00 – 23h30','Almuerzo: 13h00 – 14h30','Cena: 19h00 – 21h30']
       },
       descripcion:{
-        regular:'Incluye snacks y bebidas nacionales según horario. No incluye servicio de cena.',
-        premium:'Incluye snacks, bebidas nacionales y cena según horario extendido.',
-        ultra:'Incluye snacks, bebidas nacionales y cena, con acceso hasta el cierre.'
+        regular:'Uso de instalaciones, snacks, bebidas soft y alcohólicas y almuerzo, hasta las 17h30. No incluye servicio de cena.',
+        premium:'Igual que el Regular, con horario extendido hasta las 20h30 e incluye cena.',
+        ultra:'Horario extendido hasta la medianoche (bebidas hasta las 23h30) e incluye cena.'
       }
     },
     feriadosFijos:[
@@ -443,6 +444,7 @@ function defaultConfig(){
     usuariosCot: usuariosPorDefecto(), // personas con acceso al cotizador (rol y PIN)
     temporadaCalendario:{}, // ajustes manuales de un día puntual: { 'YYYY-MM-DD': 'alta'|'baja'|'especial' }
     incluirMoviles:true,
+    puentesAuto:true, // los días puente (fines de semana largos) llevan tarifa de feriado
     feriadosCustom:[
       // Puentes/feriados "empaquetados" que pidió Maira (correo 29-sep-2026): el hotel tarifica
       // todo el fin de semana conectado al feriado legal, no solo el día del feriado.
@@ -581,6 +583,19 @@ function migrarConfig(cfg){
     }
   }
   if(!cfg.usuariosCot){ cfg.usuariosCot = usuariosPorDefecto(); cambio = true; }
+  if(cfg.puentesAuto===undefined){ cfg.puentesAuto = true; cambio = true; }
+  { // Congruencia de horarios: Day Use con su propio ingreso/salida y mismo estilo de horarios en Pool Day.
+    const d0 = defaultConfig();
+    const viejos = {regular:'10h00 a 17h30', premium:'10h00 a 20h30', ultra:'10h00 a 00h00'};
+    if(cfg.poolday && cfg.poolday.horarios){ Object.keys(viejos).forEach(k=>{ if(cfg.poolday.horarios[k]===viejos[k]){ cfg.poolday.horarios[k] = d0.poolday.horarios[k]; cambio = true; } }); }
+    const descViejas = {regular:'Incluye snacks y bebidas nacionales según horario. No incluye servicio de cena.', premium:'Incluye snacks, bebidas nacionales y cena según horario extendido.', ultra:'Incluye snacks, bebidas nacionales y cena, con acceso hasta el cierre.'};
+    if(cfg.poolday && cfg.poolday.descripcion){ Object.keys(descViejas).forEach(k=>{ if(cfg.poolday.descripcion[k]===descViejas[k]){ cfg.poolday.descripcion[k] = d0.poolday.descripcion[k]; cambio = true; } }); }
+    if(cfg.dayUse){
+      if(!cfg.dayUse.checkIn){ cfg.dayUse.checkIn = d0.dayUse.checkIn; cambio = true; }
+      if(!cfg.dayUse.checkOut){ cfg.dayUse.checkOut = d0.dayUse.checkOut; cambio = true; }
+      if(cfg.dayUse.horario==='10h00 a 17h30 (check-in 10h00, check-out 18h00)'){ cfg.dayUse.horario = d0.dayUse.horario; cambio = true; }
+    }
+  }
   if(!Array.isArray(cfg.extraPersonaPorNoche)){ const o = cfg.extraPersonaPorNoche; cfg.extraPersonaPorNoche = (o && typeof o==='object') ? [o.AI, o.FB, o.BB].map(v=>+v||0) : [100, 80, 60]; cambio = true; }
   if(!cfg.temporadasReglas){
     // La temporada ahora sale de la regla por fechas; el calendario pintado a mano anterior se descarta.
@@ -630,6 +645,21 @@ function feriadosDelAnio(year){
   if(CFG.incluirMoviles) lista = lista.concat(feriadosMoviles(year));
   return lista;
 }
+// Puentes: los días que unen un feriado con el fin de semana (fines de semana largos) también llevan tarifa de feriado.
+//   feriado en lunes -> sábado y domingo anteriores | en viernes -> sábado y domingo siguientes
+//   feriado en martes -> sábado, domingo y lunes   | en jueves -> viernes, sábado y domingo
+const PUENTE_OFFSETS = {1:[-2,-1], 2:[-3,-2,-1], 4:[1,2,3], 5:[1,2]};
+const _puentes = {sig:'', mapa:{}};
+function mapaPuentes(year){
+  if(CFG.puentesAuto===false) return {};
+  const sig = [CFG.incluirMoviles, (CFG.feriadosFijos||[]).map(f=>f.md).join(',')].join('|');
+  if(_puentes.sig!==sig){ _puentes.sig = sig; _puentes.mapa = {}; }
+  if(_puentes.mapa[year]) return _puentes.mapa[year];
+  const m = {};
+  [year-1, year, year+1].forEach(y=>{ feriadosDelAnio(y).forEach(f=>{ const d = parseYMD(f.fecha);
+    (PUENTE_OFFSETS[d.getDay()]||[]).forEach(o=>{ const k = fmtYMD(addDays(d,o)); if(!m[k]) m[k] = f.nombre; }); }); });
+  return (_puentes.mapa[year] = m);
+}
 function getDayInfo(date){
   const ymd = fmtYMD(date);
   const custom = CFG.feriadosCustom.find(f=>f.fecha===ymd);
@@ -637,6 +667,8 @@ function getDayInfo(date){
   const anuales = feriadosDelAnio(date.getFullYear());
   const found = anuales.find(f=>f.fecha===ymd);
   if(found) return {tipo:'feriado', label:'Feriado · '+found.nombre};
+  const puente = mapaPuentes(date.getFullYear())[ymd];
+  if(puente) return {tipo:'feriado', label:'Puente · '+puente};
   const wd = date.getDay();
   if(wd===5||wd===6) return {tipo:'fin_semana', label:'Fin de semana'};
   return {tipo:'entre_semana', label:'Entre semana'};
@@ -1578,6 +1610,7 @@ function computeHospedaje(){
     wa += `• ${linea.label} — ${sub}: ${money(sinImp*taxFactor())}\n`;
   });
   wa += `\n`;
+  wa += incluyeWa(inclusiones, 'Tu plan incluye'); // la misma lista que ve el cliente en la tarjeta y en el PDF
   if(pexPorNoche(st)) wa += pexTextoWa(st, taxFactor());
   if(st.mascPeq) wa += `Mascota raza pequeña: ${st.mascPeq} × ${money(CFG.mascotaPorNoche.pequena*taxFactor())}/noche\n`;
   if(st.mascGrande) wa += `Mascota raza grande: ${st.mascGrande} × ${money(CFG.mascotaPorNoche.grande*taxFactor())}/noche\n`;
@@ -2040,7 +2073,7 @@ function computePool(){
       </table>
       <div class="qd-total"><span class="lbl">Total a pagar (impuestos incluidos)</span><span class="amt">${money(total)}</span></div>
     </div>
-    <div class="qd-footer"><span class="qd-folio">${st.folio}</span>${CFG.politicaPoolday}</div>
+    <div class="qd-footer"><span class="qd-folio">${st.folio}</span>Cotización emitida el ${fmtLong(new Date())}. ${CFG.politicaPoolday}</div>
   `;
   document.getElementById('p_result').innerHTML = html;
 
@@ -2076,7 +2109,7 @@ function computePool(){
   wa += `\n💰 *TOTAL A PAGAR (incluye impuestos): ${money(total)}*\n`;
   wa += `Valores expresados en USD (dólares de los Estados Unidos).\n\n`;
   wa += `📌 ${CFG.politicaPoolday}\n\n`;
-  wa += `¡Será un gusto recibirle en Playa Paraíso! 😊`;
+  wa += `Quedamos atentos para coordinar los siguientes pasos. ¡Será un gusto recibirle en Playa Paraíso! 😊`;
   document.getElementById('p_waText').value = wa;
 }
 
@@ -2678,6 +2711,7 @@ function renderCfgEspeciales(body){
       <div><label>4 personas — sin impuestos</label><input type="number" step="0.01" id="cfg_du_4" value="${CFG.dayUse.tarifas['4'].sin}"></div>
     </div>
     <label>Horario</label><input type="text" id="cfg_du_horario" value="${CFG.dayUse.horario}">
+    <div class="row"><div><label>Check-in del Day Use</label><input type="text" id="cfg_du_ci" value="${CFG.dayUse.checkIn||'10h00'}"></div><div><label>Check-out del Day Use</label><input type="text" id="cfg_du_co" value="${CFG.dayUse.checkOut||'18h00'}"></div></div>
     <label>Qué incluye (una línea por beneficio)</label><textarea rows="6" id="cfg_du_incluye">${(CFG.dayUse.incluye||[]).join('\n')}</textarea>
     <label style="display:flex; align-items:center; gap:8px; font-weight:600; margin-top:12px;"><input type="checkbox" id="cfg_up_activo" ${CFG.dayUse.upsellDesdePoolDay.activo?'checked':''} style="width:auto;"> Activar upgrade Pool Day Regular → Day Use</label>
     <div class="row">
@@ -2710,6 +2744,8 @@ function renderCfgEspeciales(body){
   document.getElementById('cfg_du_2').onchange = e=>{ const v=parseFloat(e.target.value)||0; CFG.dayUse.tarifas['2']={sin:v, incl:v*taxFactor()}; };
   document.getElementById('cfg_du_4').onchange = e=>{ const v=parseFloat(e.target.value)||0; CFG.dayUse.tarifas['4']={sin:v, incl:v*taxFactor()}; };
   document.getElementById('cfg_du_horario').onchange = e=>CFG.dayUse.horario = e.target.value;
+  document.getElementById('cfg_du_ci').onchange = e=>CFG.dayUse.checkIn = e.target.value;
+  document.getElementById('cfg_du_co').onchange = e=>CFG.dayUse.checkOut = e.target.value;
   const lineasDe = v=>v.split('\n').map(s=>s.trim()).filter(Boolean);
   document.getElementById('cfg_du_incluye').onchange = e=>CFG.dayUse.incluye = lineasDe(e.target.value);
   document.getElementById('cfg_nb_incluye').onchange = e=>nb.incluye = lineasDe(e.target.value);
@@ -2985,6 +3021,12 @@ function renderCfgFeriados(body){
     <div class="holiday-list">${feriadosMoviles(anioActual).concat(feriadosMoviles(anioActual+1)).map(f=>`<div class="holiday-item"><span>${f.nombre}</span><span>${f.fecha}</span></div>`).join('')}</div>
   </div>`;
 
+  { const directos = new Set(feriadosDelAnio(anioActual).map(f=>f.fecha).concat(CFG.feriadosCustom.map(f=>f.fecha)));
+    const pu = Object.entries(mapaPuentes(anioActual)).filter(([k])=>k.startsWith(''+anioActual) && !directos.has(k)).sort((a,b)=>a[0].localeCompare(b[0]));
+    html += `<div class="card"><h3>Días puente</h3>
+    <label style="display:flex; align-items:center; gap:8px; font-weight:400;"><input type="checkbox" id="cfg_puentes" ${CFG.puentesAuto!==false?'checked':''} style="width:auto;"> Aplicar tarifa de feriado a los días puente (fines de semana largos)</label>
+    <div class="small-note">Feriado en lunes: sábado y domingo anteriores · en viernes: sábado y domingo siguientes · en martes: sábado, domingo y lunes · en jueves: viernes, sábado y domingo. Los días que agregues abajo como personalizados siguen valiendo igual. Puentes ${anioActual}:</div>
+    <div class="holiday-list">${pu.map(([k,n])=>`<div class="holiday-item"><span>Puente · ${n}</span><span>${k}</span></div>`).join('') || '<div class="holiday-item muted">Sin días puente</div>'}</div></div>`; }
   html += `<div class="card"><h3>Feriados personalizados / cantonales / cierres del hotel</h3>
     <div class="row"><div><input type="date" id="cfg_custom_fecha"></div><div><input type="text" id="cfg_custom_nombre" placeholder="Nombre (ej: Feriado trasladado, Cantonización Playas...)"></div><div style="flex:0 0 auto;"><button class="btn small" id="cfg_custom_add">Agregar</button></div></div>
     <div class="holiday-list" style="margin-top:10px;">${CFG.feriadosCustom.length? CFG.feriadosCustom.map((f,i)=>`<div class="holiday-item"><span>${f.fecha} — ${f.nombre}</span><button class="btn danger small" data-delc="${i}">Eliminar</button></div>`).join('') : '<div class="holiday-item muted">Sin feriados personalizados</div>'}</div>
@@ -2998,6 +3040,7 @@ function renderCfgFeriados(body){
   body.querySelectorAll('[data-delff]').forEach(b=> b.onclick = ()=>{ CFG.feriadosFijos.splice(parseInt(b.dataset.delff),1); renderConfigBody(); });
   document.getElementById('cfg-ff-add').onclick = ()=>{ CFG.feriadosFijos.push({md:'01-01', nombre:'Nuevo feriado'}); renderConfigBody(); };
   document.getElementById('cfg_moviles').onchange = e=>{ CFG.incluirMoviles = e.target.checked; renderConfigBody(); };
+  document.getElementById('cfg_puentes').onchange = e=>{ CFG.puentesAuto = e.target.checked; renderConfigBody(); };
   document.getElementById('cfg_custom_add').onclick = ()=>{
     const fe = document.getElementById('cfg_custom_fecha').value;
     const no = document.getElementById('cfg_custom_nombre').value || 'Feriado personalizado';
@@ -3126,8 +3169,8 @@ function computeDiurno(){
     <div class="qd-body">
       <div class="qd-clientline">Preparado para: <b>${st.clienteNombre || 'estimado(a) huésped'}</b></div>
       <div class="qd-cols">
-        <div class="qd-col"><div class="qd-label">Check-in</div><div class="qd-val">${fmtLong(fecha)}<br><span class="muted">desde las ${CFG.checkIn}</span></div></div>
-        <div class="qd-col"><div class="qd-label">Check-out</div><div class="qd-val">${fmtLong(fecha)}<br><span class="muted">hasta las ${CFG.checkOut}</span></div></div>
+        <div class="qd-col"><div class="qd-label">Check-in</div><div class="qd-val">${fmtLong(fecha)}<br><span class="muted">desde las ${CFG.dayUse.checkIn||'10h00'}</span></div></div>
+        <div class="qd-col"><div class="qd-label">Check-out</div><div class="qd-val">${fmtLong(fecha)}<br><span class="muted">hasta las ${CFG.dayUse.checkOut||'18h00'}</span></div></div>
         <div class="qd-col"><div class="qd-label">Personas / unidades</div><div class="qd-val">${st.personas} personas × ${st.unidades}</div></div>
       </div>
       ${incluyeHtml(CFG.dayUse.incluye, 'Tu Day Use incluye')}
@@ -3140,7 +3183,7 @@ function computeDiurno(){
       </table>
       <div class="qd-total"><span class="lbl">Total a pagar (impuestos incluidos)</span><span class="amt">${money(total)}</span></div>
     </div>
-    <div class="qd-footer"><span class="qd-folio">${st.folio}</span>${CFG.politicaHospedaje}</div>
+    <div class="qd-footer"><span class="qd-folio">${st.folio}</span>Cotización emitida el ${fmtLong(new Date())}. ${CFG.politicaHospedaje}</div>
   `;
   document.getElementById('d_result').innerHTML = html;
 
@@ -3150,8 +3193,8 @@ function computeDiurno(){
     blocks.push({type:'meta', text:`N.º ${st.folio} · ${fmtLong(new Date())}`, color:'#7a6f6a'});
     blocks.push({type:'meta', text:`Preparado para: ${st.clienteNombre || 'estimado(a) huésped'}`});
     blocks.push({type:'cols', items:[
-      {label:'Check-in', value:`${fmtLong(fecha)} · desde ${CFG.checkIn}`},
-      {label:'Check-out', value:`${fmtLong(fecha)} · hasta ${CFG.checkOut}`},
+      {label:'Check-in', value:`${fmtLong(fecha)} · desde ${CFG.dayUse.checkIn||'10h00'}`},
+      {label:'Check-out', value:`${fmtLong(fecha)} · hasta ${CFG.dayUse.checkOut||'18h00'}`},
       {label:'Personas', value:`${st.personas} × ${st.unidades}`}
     ]});
     incluyeBlocks(CFG.dayUse.incluye, 'Tu Day Use incluye').forEach(b=>blocks.push(b));
@@ -3173,7 +3216,8 @@ function computeDiurno(){
   if(descuentoMonto>0) wa += `Descuento (${descLabel}): -${money(descuentoMonto*taxFactor())}\n`;
   wa += `*TOTAL A PAGAR (incluye impuestos): ${money(total)}*\n`;
   wa += `Valores expresados en USD (dólares de los Estados Unidos).\n\n`;
-  wa += `📌 ${CFG.politicaHospedaje}\n\nQuedamos atentos. ¡Será un gusto recibirle en Playa Paraíso! 😊`;
+  wa += `📌 ${CFG.politicaHospedaje}\n\n`;
+  wa += `Quedamos atentos para coordinar los siguientes pasos. ¡Será un gusto recibirle en Playa Paraíso! 😊`;
   document.getElementById('d_waText').value = wa;
 }
 
@@ -3307,7 +3351,7 @@ function computeEventos(){
       </table>
       <div class="qd-total"><span class="lbl">Total a pagar (impuestos incluidos)</span><span class="amt">${money(total)}</span></div>
     </div>
-    <div class="qd-footer"><span class="qd-folio">${st.folio}</span>${CFG.politicaPoolday}</div>
+    <div class="qd-footer"><span class="qd-folio">${st.folio}</span>Cotización emitida el ${fmtLong(new Date())}. ${CFG.politicaPoolday}</div>
   `;
   document.getElementById('e_result').innerHTML = html;
 
@@ -3330,7 +3374,9 @@ function computeEventos(){
   wa += `📅 *Fecha*: ${fmtLong(fecha)}\n👥 Adultos: ${st.adultos}   Niños: ${st.ninos}${st.infantes?('   Infantes: '+st.infantes):''}\n\n`;
   wa += incluyeWa(incluyeEvento, 'Incluye');
   wa += `💰 *TOTAL A PAGAR (incluye impuestos): ${money(total)}*\n`;
-  wa += `Valores expresados en USD.\n\nQuedamos atentos. ¡Será un gusto recibirle en Playa Paraíso! 😊`;
+  wa += `Valores expresados en USD (dólares de los Estados Unidos).\n\n`;
+  wa += `📌 ${CFG.politicaPoolday}\n\n`;
+  wa += `Quedamos atentos para coordinar los siguientes pasos. ¡Será un gusto recibirle en Playa Paraíso! 😊`;
   document.getElementById('e_waText').value = wa;
 }
 
