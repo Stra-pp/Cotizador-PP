@@ -398,6 +398,8 @@ function defaultConfig(){
       // el precio de $45 se maneja como descuento del 10% en casos de negociación.
       // Infantes sin costo. Mascotas: 20 / 30 sin impuestos (25.00 / 37.50 con impuestos).
       version:3,
+      // Regular en feriados y puentes: adulto $55, niño igual ($30). Premium y Ultra no cambian.
+      tarifaFeriado:{ regular:{adulto:55, nino:30} },
       tarifas:{
         regular:{adulto:50, nino:30},
         premium:{adulto:60, nino:35},
@@ -466,7 +468,7 @@ function defaultConfig(){
         nombre:'Navidad', anio:2026,
         rango:'24 al 26 de diciembre de 2026',
         checkin:{'2d1n':'2026-12-24','3d2n':'2026-12-24','4d3n':'2026-12-24','5d4n':'2026-12-23'},
-        nota5d4n:'El PDF de Maira trae el mismo total del paquete de 4 días/3 noches duplicado en este paquete (5 días/4 noches) — parece un error de copiado en su archivo. Se deja deshabilitado hasta que ella lo confirme.',
+        nota5d4n:'Tarifa del paquete de 5 días y 4 noches según el PDF actualizado (Tarifario_Festivo_Dic_NVD_2026).',
         incluye:[
           'Todo incluido: snacks, desayunos, almuerzos y cenas',
           'Cena especial Noche Buena – 24 de diciembre',
@@ -477,20 +479,20 @@ function defaultConfig(){
           'Colchón ortopédico, baño con ducha tipo lluvia, A/C, TV por cable, teléfono y mini refrigerador'
         ],
         habitaciones:{
-          'Matrimonial Jr. Suite':  {'2d1n':{sin:200,incl:250},'3d2n':{sin:384,incl:480},'4d3n':{sin:568,incl:710},'5d4n':null},
-          'Matrimonial veranera':   {'2d1n':{sin:184,incl:230},'3d2n':{sin:368,incl:460},'4d3n':{sin:520,incl:650},'5d4n':null},
-          'Master suite':           {'2d1n':{sin:328,incl:410},'3d2n':{sin:640,incl:800},'4d3n':{sin:952,incl:1190},'5d4n':null},
-          'Master suite doble':     {'2d1n':{sin:360,incl:450},'3d2n':{sin:704,incl:880},'4d3n':{sin:1048,incl:1310},'5d4n':null},
-          'Doble Deluxe':           {'2d1n':{sin:368,incl:460},'3d2n':{sin:696,incl:870},'4d3n':{sin:1024,incl:1280},'5d4n':null},
-          'Doble veranera':         {'2d1n':{sin:352,incl:440},'3d2n':{sin:672,incl:840},'4d3n':{sin:992,incl:1240},'5d4n':null},
-          'Doble mas cama extra':   {'2d1n':{sin:428,incl:535},'3d2n':{sin:812,incl:1015},'4d3n':{sin:1196,incl:1495},'5d4n':null}
+          'Matrimonial Jr. Suite':  {'2d1n':{sin:200,incl:250},'3d2n':{sin:384,incl:480},'4d3n':{sin:568,incl:710},'5d4n':{sin:752,incl:940}},
+          'Matrimonial veranera':   {'2d1n':{sin:184,incl:230},'3d2n':{sin:368,incl:460},'4d3n':{sin:520,incl:650},'5d4n':{sin:688,incl:860}},
+          'Master suite':           {'2d1n':{sin:328,incl:410},'3d2n':{sin:640,incl:800},'4d3n':{sin:952,incl:1190},'5d4n':{sin:1264,incl:1580}},
+          'Master suite doble':     {'2d1n':{sin:360,incl:450},'3d2n':{sin:704,incl:880},'4d3n':{sin:1048,incl:1310},'5d4n':{sin:1392,incl:1740}},
+          'Doble Deluxe':           {'2d1n':{sin:368,incl:460},'3d2n':{sin:696,incl:870},'4d3n':{sin:1024,incl:1280},'5d4n':{sin:1352,incl:1690}},
+          'Doble veranera':         {'2d1n':{sin:352,incl:440},'3d2n':{sin:672,incl:840},'4d3n':{sin:992,incl:1240},'5d4n':{sin:1312,incl:1640}},
+          'Doble mas cama extra':   {'2d1n':{sin:428,incl:535},'3d2n':{sin:812,incl:1015},'4d3n':{sin:1196,incl:1495},'5d4n':{sin:1580,incl:1975}}
         }
       },
       finDeAno:{
         nombre:'Fin de Año', anio:2026,
         rango:'31 de diciembre de 2026 al 2 de enero de 2027',
         checkin:{'2d1n':'2026-12-31','3d2n':'2026-12-31','4d3n':'2026-12-31','5d4n':'2026-12-30'},
-        nota5d4n:'Este paquete (5 días/4 noches) cobra 3 de las 4 noches — promoción verificada y consistente en el PDF de Maira para todas las habitaciones.',
+        nota5d4n:'Paquete de 5 días y 4 noches: suma de las 4 noches, según el PDF actualizado (Tarifario_Festivo_Dic_FDA_2026).',
         incluye:[
           'Todo incluido: snacks, desayunos, almuerzos y cenas',
           'Cena Fiesta 31 de diciembre: buffet asistido + copa de vino/bebidas soft ilimitadas',
@@ -503,13 +505,13 @@ function defaultConfig(){
           'Colchón ortopédico, baño con ducha tipo lluvia, A/C, TV por cable, teléfono y mini refrigerador'
         ],
         habitaciones:{
-          'Matrimonial Jr. Suite':  {'2d1n':{sin:525,incl:656.25},'3d2n':{sin:815,incl:1018.75},'4d3n':{sin:1060,incl:1325},'5d4n':{sin:900,incl:1125}},
-          'Matrimonial veranera':   {'2d1n':{sin:525,incl:656.25},'3d2n':{sin:815,incl:1018.75},'4d3n':{sin:1060,incl:1325},'5d4n':{sin:900,incl:1125}},
-          'Master suite':           {'2d1n':{sin:682.50,incl:853.13},'3d2n':{sin:985,incl:1231.25},'4d3n':{sin:1306,incl:1632.50},'5d4n':{sin:1306,incl:1632.50}},
-          'Master suite doble':     {'2d1n':{sin:861.00,incl:1076.25},'3d2n':{sin:1230,incl:1537.50},'4d3n':{sin:1540,incl:1925},'5d4n':{sin:1540,incl:1925}},
-          'Doble Deluxe':           {'2d1n':{sin:787.50,incl:984.38},'3d2n':{sin:1145,incl:1431.25},'4d3n':{sin:1460,incl:1825},'5d4n':{sin:1460,incl:1825}},
-          'Doble veranera':         {'2d1n':{sin:787.50,incl:984.38},'3d2n':{sin:1145,incl:1431.25},'4d3n':{sin:1460,incl:1825},'5d4n':{sin:1460,incl:1825}},
-          'Doble mas cama extra':   {'2d1n':{sin:993.30,incl:1241.63},'3d2n':{sin:1409,incl:1761.25},'4d3n':{sin:1792,incl:2240},'5d4n':{sin:1754,incl:2192.50}}
+          'Matrimonial Jr. Suite':  {'2d1n':{sin:525,incl:656.25},'3d2n':{sin:815,incl:1018.75},'4d3n':{sin:1060,incl:1325},'5d4n':{sin:1100,incl:1375}},
+          'Matrimonial veranera':   {'2d1n':{sin:525,incl:656.25},'3d2n':{sin:815,incl:1018.75},'4d3n':{sin:1060,incl:1325},'5d4n':{sin:1100,incl:1375}},
+          'Master suite':           {'2d1n':{sin:682.50,incl:853.13},'3d2n':{sin:985,incl:1231.25},'4d3n':{sin:1306,incl:1632.50},'5d4n':{sin:1634,incl:2042.50}},
+          'Master suite doble':     {'2d1n':{sin:861.00,incl:1076.25},'3d2n':{sin:1230,incl:1537.50},'4d3n':{sin:1540,incl:1925},'5d4n':{sin:1900,incl:2375}},
+          'Doble Deluxe':           {'2d1n':{sin:787.50,incl:984.38},'3d2n':{sin:1145,incl:1431.25},'4d3n':{sin:1460,incl:1825},'5d4n':{sin:1815,incl:2268.75}},
+          'Doble veranera':         {'2d1n':{sin:787.50,incl:984.38},'3d2n':{sin:1145,incl:1431.25},'4d3n':{sin:1460,incl:1825},'5d4n':{sin:1815,incl:2268.75}},
+          'Doble mas cama extra':   {'2d1n':{sin:993.30,incl:1241.63},'3d2n':{sin:1409,incl:1761.25},'4d3n':{sin:1792,incl:2240},'5d4n':{sin:2158,incl:2697.50}}
         }
       }
     },
@@ -584,6 +586,16 @@ function migrarConfig(cfg){
   }
   if(!cfg.usuariosCot){ cfg.usuariosCot = usuariosPorDefecto(); cambio = true; }
   if(cfg.puentesAuto===undefined){ cfg.puentesAuto = true; cambio = true; }
+  { // Pool Day Regular en feriados y puentes + paquetes festivos del PDF actualizado
+    const d1 = defaultConfig();
+    if(cfg.poolday && !cfg.poolday.tarifaFeriado){ cfg.poolday.tarifaFeriado = d1.poolday.tarifaFeriado; cambio = true; }
+    const pf = cfg.paquetesFestivos;
+    if(pf && pf.navidad && pf.navidad.habitaciones){ Object.keys(d1.paquetesFestivos.navidad.habitaciones).forEach(hb=>{ const x = pf.navidad.habitaciones[hb];
+      if(x && !x['5d4n']){ x['5d4n'] = d1.paquetesFestivos.navidad.habitaciones[hb]['5d4n']; cambio = true; } }); }
+    const viejoFDA = {'Matrimonial Jr. Suite':900,'Matrimonial veranera':900,'Master suite':1306,'Master suite doble':1540,'Doble Deluxe':1460,'Doble veranera':1460,'Doble mas cama extra':1754};
+    if(pf && pf.finDeAno && pf.finDeAno.habitaciones){ Object.keys(viejoFDA).forEach(hb=>{ const x = pf.finDeAno.habitaciones[hb];
+      if(x && x['5d4n'] && x['5d4n'].sin===viejoFDA[hb]){ x['5d4n'] = d1.paquetesFestivos.finDeAno.habitaciones[hb]['5d4n']; cambio = true; } }); }
+  }
   { // Congruencia de horarios: Day Use con su propio ingreso/salida y mismo estilo de horarios en Pool Day.
     const d0 = defaultConfig();
     const viejos = {regular:'10h00 a 17h30', premium:'10h00 a 20h30', ultra:'10h00 a 00h00'};
@@ -1999,12 +2011,15 @@ function computePool(){
   const st = poolState();
   const fechaVisita = parseYMD(st.fecha);
   const info = getDayInfo(fechaVisita);
-  const tarifas = CFG.poolday.tarifas[st.tipo];
+  const esFeriadoPD = info.tipo==='feriado'; // incluye los días puente
+  const tf0 = CFG.poolday.tarifaFeriado && CFG.poolday.tarifaFeriado.regular;
+  const usaTarifaFeriado = esFeriadoPD && st.tipo==='regular' && !!tf0;
+  const tarifas = usaTarifaFeriado ? tf0 : CFG.poolday.tarifas[st.tipo];
   const adultoSin = tarifas.adulto, ninoSin = tarifas.nino;
 
   document.getElementById('p_infoBadges').innerHTML =
     `<span class="badge ${badgeClass(info.tipo)}">${info.label}</span> `+
-    `<span class="tag">Tarifa ${st.tipo}: ${money(adultoSin)} adulto · ${money(ninoSin)} niño (sin imp.) — igual todos los días</span>` +
+    `<span class="tag">Tarifa ${st.tipo}${usaTarifaFeriado?' de feriado / puente':''}: ${money(adultoSin)} adulto · ${money(ninoSin)} niño (sin imp.)${(st.tipo==='regular' && !usaTarifaFeriado && tf0)?' — en feriados y puentes: '+money(tf0.adulto)+' adulto':''}</span>` +
     `<div class="small-note" style="margin-top:8px;">${CFG.poolday.descripcion[st.tipo]} Infantes: sin costo.</div>` +
     (info.tipo==='feriado' ? `<div class="warn" style="margin-top:8px;">La fecha corresponde a un feriado — revisa disponibilidad y capacidad del hotel para Pool Day en fechas de alta demanda.</div>` : '');
 
@@ -2930,6 +2945,7 @@ function renderCfgRack(body){
 function renderCfgPoolday(body){
   const filas = [
     ['Pool Day Regular', 'tarifas.regular'],
+    ['Pool Day Regular — feriados y puentes', 'tarifaFeriado.regular'],
     ['Pool Day Premium', 'tarifas.premium'],
     ['Pool Day Ultra', 'tarifas.ultra']
   ];
@@ -2943,7 +2959,7 @@ function renderCfgPoolday(body){
       <td><input type="number" step="0.01" class="cfg-pd" data-path="${path}.nino" value="${t.nino}"></td>
       <td class="muted">${money(t.nino*taxFactor())}</td></tr>`;
   });
-  html += '</table><div class="small-note">Infantes sin costo. La tarifa es la misma todos los días. El precio de negociación (por ejemplo $45 sobre el Regular de $50) se aplica con el descuento del 10% en la cotización; los porcentajes se editan en Descuentos.</div>';
+  html += '</table><div class="small-note">Infantes sin costo. La tarifa es la misma todos los días, salvo el Regular en feriados y puentes (segunda fila). El precio de negociación (por ejemplo $45 sobre el Regular de $50) se aplica con el descuento del 10% en la cotización; los porcentajes se editan en Descuentos.</div>';
   html += `<div class="row" style="margin-top:14px;">
     <div><label>Mascota pequeña 🔒</label><input type="number" step="0.01" id="cfg_pd_mp" value="${CFG.poolday.mascota.pequena}" ${lockAttr(true)}></div>
     <div><label>Mascota grande 🔒</label><input type="number" step="0.01" id="cfg_pd_mg" value="${CFG.poolday.mascota.grande}" ${lockAttr(true)}></div>
@@ -3183,7 +3199,7 @@ function computeDiurno(){
       </table>
       <div class="qd-total"><span class="lbl">Total a pagar (impuestos incluidos)</span><span class="amt">${money(total)}</span></div>
     </div>
-    <div class="qd-footer"><span class="qd-folio">${st.folio}</span>Cotización emitida el ${fmtLong(new Date())}. ${CFG.politicaHospedaje}</div>
+    <div class="qd-footer"><span class="qd-folio">${st.folio}</span>Cotización emitida el ${fmtLong(new Date())}. ${CFG.politicaPoolday}</div>
   `;
   document.getElementById('d_result').innerHTML = html;
 
@@ -3203,7 +3219,7 @@ function computeDiurno(){
     blocks.push({type:'divider'});
     if(descuentoMonto>0) blocks.push({type:'item', label:`Descuento (${descLabel})`, price:'-'+money(descuentoMonto*taxFactor())});
     blocks.push({type:'total', label:'Total a pagar (impuestos incluidos)', value:money(total), big:true, color:'#402021'});
-    blocks.push({type:'footer', lines:['## Condiciones', CFG.politicaHospedaje]});
+    blocks.push({type:'footer', lines:['## Condiciones', CFG.politicaPoolday]});
     window.__blocksDiurno = blocks;
   }
 
@@ -3216,7 +3232,7 @@ function computeDiurno(){
   if(descuentoMonto>0) wa += `Descuento (${descLabel}): -${money(descuentoMonto*taxFactor())}\n`;
   wa += `*TOTAL A PAGAR (incluye impuestos): ${money(total)}*\n`;
   wa += `Valores expresados en USD (dólares de los Estados Unidos).\n\n`;
-  wa += `📌 ${CFG.politicaHospedaje}\n\n`;
+  wa += `📌 ${CFG.politicaPoolday}\n\n`;
   wa += `Quedamos atentos para coordinar los siguientes pasos. ¡Será un gusto recibirle en Playa Paraíso! 😊`;
   document.getElementById('d_waText').value = wa;
 }
