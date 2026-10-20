@@ -468,7 +468,8 @@ function defaultConfig(){
       navidad:{
         nombre:'Navidad', anio:2026,
         rango:'24 al 26 de diciembre de 2026',
-        checkin:{'2d1n':'2026-12-24','3d2n':'2026-12-24','4d3n':'2026-12-24','5d4n':'2026-12-23'},
+        nocheEspecial:'2026-12-24', // el paquete aplica a cualquier estadía de 1 a 4 noches que incluya esta noche
+        checkin:{'2d1n':'2026-12-24','3d2n':'2026-12-24','4d3n':'2026-12-24','5d4n':'2026-12-23'}, // fecha de llegada sugerida por el PDF
         nota5d4n:'Tarifa del paquete de 5 días y 4 noches según el PDF actualizado (Tarifario_Festivo_Dic_NVD_2026).',
         incluye:[
           'Todo incluido: snacks, desayunos, almuerzos y cenas',
@@ -492,6 +493,7 @@ function defaultConfig(){
       finDeAno:{
         nombre:'Fin de Año', anio:2026,
         rango:'31 de diciembre de 2026 al 2 de enero de 2027',
+        nocheEspecial:'2026-12-31',
         checkin:{'2d1n':'2026-12-31','3d2n':'2026-12-31','4d3n':'2026-12-31','5d4n':'2026-12-30'},
         nota5d4n:'Paquete de 5 días y 4 noches: suma de las 4 noches, según el PDF actualizado (Tarifario_Festivo_Dic_FDA_2026).',
         incluye:[
@@ -589,6 +591,7 @@ function migrarConfig(cfg){
   if(cfg.puentesAuto===undefined){ cfg.puentesAuto = true; cambio = true; }
   { // Pool Day Regular en feriados y puentes + paquetes festivos del PDF actualizado
     const d1 = defaultConfig();
+    if(cfg.paquetesFestivos){ Object.keys(d1.paquetesFestivos).forEach(k=>{ const pk = cfg.paquetesFestivos[k]; if(pk && !pk.nocheEspecial){ pk.nocheEspecial = d1.paquetesFestivos[k].nocheEspecial; cambio = true; } }); }
     if(cfg.poolday && !cfg.poolday.tarifaFeriado){ cfg.poolday.tarifaFeriado = d1.poolday.tarifaFeriado; cambio = true; }
     const pf = cfg.paquetesFestivos;
     if(pf && pf.navidad && pf.navidad.habitaciones){ Object.keys(d1.paquetesFestivos.navidad.habitaciones).forEach(hb=>{ const x = pf.navidad.habitaciones[hb];
@@ -628,6 +631,24 @@ function showToast(msg){
 /* ============================= FECHAS Y FERIADOS ============================= */
 const DIAS = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
 const NOCHES_PAQUETE = {'2d1n':1,'3d2n':2,'4d3n':3,'5d4n':4};
+// El paquete de N noches se puede tomar con cualquier llegada, siempre que la estadía incluya la noche especial
+// (24-dic en Navidad, 31-dic en Fin de Año). El total del paquete depende solo de las noches, no de la posición de esa noche.
+function festInicio(st){
+  const pack = CFG.paquetesFestivos[st.festPaquete]; const N = NOCHES_PAQUETE[st.festDuracion];
+  const esp = parseYMD(pack.nocheEspecial || pack.checkin['2d1n']);
+  const desde = addDays(esp, -(N-1)), hasta = esp;
+  const inicio = st.festCheckin ? parseYMD(st.festCheckin) : parseYMD(pack.checkin[st.festDuracion]);
+  return {inicio, esp, desde, hasta, noches:N, valido: inicio.getTime()>=desde.getTime() && inicio.getTime()<=hasta.getTime()};
+}
+function actualizarFestFechaUI(st){
+  const inp = document.getElementById('h_festFecha'); if(!inp || st.categoria!=='festivo') return;
+  const f = festInicio(st); inp.min = fmtYMD(f.desde); inp.max = fmtYMD(f.hasta); inp.value = fmtYMD(f.inicio);
+  inp.style.borderColor = f.valido ? '' : '#C20F2F';
+  const hint = document.getElementById('h_festFechaHint');
+  if(hint) hint.innerHTML = f.valido
+    ? `El paquete de ${f.noches} noche${f.noches>1?'s':''} aplica a cualquier llegada entre el ${fmtLong(f.desde)} y el ${fmtLong(f.hasta)}, porque la estadía incluye la noche del ${fmtLong(f.esp)}. Salida: ${fmtLong(addDays(f.inicio,f.noches))}.`
+    : `<span style="color:#C20F2F;"><b>Esa llegada no incluye la noche del ${fmtLong(f.esp)}.</b> Elige un check-in entre el ${fmtLong(f.desde)} y el ${fmtLong(f.hasta)}.</span>`;
+}
 const LABEL_PAQUETE = {'2d1n':'2 días y 1 noche','3d2n':'3 días y 2 noches','4d3n':'4 días y 3 noches','5d4n':'5 días y 4 noches'};
 function parseYMD(s){ const [y,m,d]=s.split('-').map(Number); return new Date(y,m-1,d); }
 function fmtYMD(d){ return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()); }
@@ -740,6 +761,7 @@ function hospedajeState(){
     categoria: 'estandar', // estandar | rack | festivo
     festPaquete: 'navidad',
     festDuracion: '4d3n',
+    festCheckin: '', // fecha de llegada elegida ('' = la sugerida por el PDF)
     festHabitacion: Object.keys(CFG.paquetesFestivos.navidad.habitaciones)[0],
     festLineas: [], // carrito del paquete festivo: cada habitación se agrega por separado (pueden ser de distinto tipo)
     tipoHab: 'doble',
@@ -964,11 +986,14 @@ function renderHospedaje(){
           <div id="h_festivoBox" ${st.categoria!=='festivo'?'hidden':''}>
             <label>Paquete</label>
             <select id="h_festPaquete">
-              <option value="navidad" ${st.festPaquete==='navidad'?'selected':''}>Navidad (${CFG.paquetesFestivos.navidad.rango})</option>
-              <option value="finDeAno" ${st.festPaquete==='finDeAno'?'selected':''}>Fin de Año (${CFG.paquetesFestivos.finDeAno.rango})</option>
+              <option value="navidad" ${st.festPaquete==='navidad'?'selected':''}>Navidad (noche especial: ${fmtLong(parseYMD(CFG.paquetesFestivos.navidad.nocheEspecial||'2026-12-24'))})</option>
+              <option value="finDeAno" ${st.festPaquete==='finDeAno'?'selected':''}>Fin de Año (noche especial: ${fmtLong(parseYMD(CFG.paquetesFestivos.finDeAno.nocheEspecial||'2026-12-31'))})</option>
             </select>
             <label>Duración</label>
             <select id="h_festDuracion"></select>
+            <label>Fecha de check-in del paquete</label>
+            <input type="date" id="h_festFecha">
+            <div class="small-note" id="h_festFechaHint"></div>
             <label>Habitación (tarifa de festivo)</label>
             <div class="room-grid" id="h_fest_grid"></div>
             <div id="h_festAviso"></div>
@@ -1064,6 +1089,7 @@ function renderHospedaje(){
     const durSel = document.getElementById('h_festDuracion');
     durSel.innerHTML = Object.keys(NOCHES_PAQUETE).map(k=>`<option value="${k}" ${st.festDuracion===k?'selected':''}>${LABEL_PAQUETE[k]}</option>`).join('');
     renderFestGrid(st);
+    actualizarFestFechaUI(st);
   }
 
   // extras list
@@ -1109,11 +1135,12 @@ function renderHospedaje(){
   });
   if(st.categoria==='festivo'){
     document.getElementById('h_festPaquete').onchange = e=>{
-      st.festPaquete = e.target.value;
+      st.festPaquete = e.target.value; st.festCheckin = '';
       st.festHabitacion = Object.keys(CFG.paquetesFestivos[st.festPaquete].habitaciones)[0];
       renderHospedaje(); computeHospedaje();
     };
-    document.getElementById('h_festDuracion').onchange = e=>{ st.festDuracion=e.target.value; renderHospedaje(); computeHospedaje(); };
+    document.getElementById('h_festDuracion').onchange = e=>{ st.festDuracion=e.target.value; st.festCheckin=''; renderHospedaje(); computeHospedaje(); };
+    document.getElementById('h_festFecha').onchange = e=>{ st.festCheckin=e.target.value; actualizarFestFechaUI(st); computeHospedaje(); };
     document.getElementById('h_festAdd').onclick = ()=>{ if(addFestLinea(st)) computeHospedaje(); };
   }
   document.getElementById('h_addLinea').onclick = ()=>{ addLineaHospedaje(st); renderLineasCard(st); refrescarExtrasPorPersona(st); computeHospedaje(); };
@@ -1230,11 +1257,19 @@ function renderFestLineasCard(st){
 function computeHospedajeFestivo(st){
   const pack = CFG.paquetesFestivos[st.festPaquete];
   const noches = NOCHES_PAQUETE[st.festDuracion];
-  const inicio = parseYMD(pack.checkin[st.festDuracion]);
-  renderFestLineasCard(st);
+  const fi = festInicio(st); const inicio = fi.inicio;
+  renderFestLineasCard(st); actualizarFestFechaUI(st);
 
   if(st.festLineas.length===0){
     document.getElementById('h_result').innerHTML = `<div class="empty-note">Agrega al menos una habitación al paquete para ver la cotización.</div>`;
+    document.getElementById('h_waText').value = '';
+    window.__blocksHospedaje = null;
+    return;
+  }
+  if(!fi.valido){
+    document.getElementById('h_result').innerHTML = `<div class="qd-header"><h1>Playa Paraíso</h1><div class="qd-sub">Paquete ${pack.nombre}</div></div>
+      <div class="qd-body"><div class="warn danger">La llegada elegida (${fmtLong(inicio)}) no incluye la noche del ${fmtLong(fi.esp)}, por eso no aplica el paquete.</div>
+      <div class="small-note">Elige un check-in entre el ${fmtLong(fi.desde)} y el ${fmtLong(fi.hasta)}, o cotiza estas fechas como hospedaje normal.</div></div>`;
     document.getElementById('h_waText').value = '';
     window.__blocksHospedaje = null;
     return;
@@ -3724,7 +3759,7 @@ function quoteFirma(key, st, total){
   let fechas, habit, serv;
   if(key==='h'){
     const comun = `${ext(st.extrasQty)}|pe${pexCantidades(st).join('-')}|m${st.mascPeq}/${st.mascGrande}|d${st.descuentoIdx}`;
-    if(st.categoria==='festivo'){ fechas = `festivo|${st.festPaquete}|${st.festDuracion}`; habit = JSON.stringify((st.festLineas||[]).map(l=>l.label).sort()); serv = 'festivo|'+comun; }
+    if(st.categoria==='festivo'){ fechas = `festivo|${st.festPaquete}|${st.festDuracion}|${fmtYMD(festInicio(st).inicio)}`; habit = JSON.stringify((st.festLineas||[]).map(l=>l.label).sort()); serv = 'festivo|'+comun; }
     else { fechas = `${st.fecha}|${st.noches}`; habit = JSON.stringify((st.lineas||[]).map(l=>l.label+':'+(l.categoria==='rack'?0:l.ocupacion)).sort());
       serv = JSON.stringify((st.lineas||[]).map(l=>l.plan).sort())+`|promo${st.promocionManual?1:0}|`+comun; }
   } else if(key==='p'){ fechas = st.fecha; habit = `a${st.adultos}|n${st.ninos}`; serv = `${st.tipo}|m${st.mascPeq}/${st.mascGrande}|up${st.upgradeDayUse?st.habitacionesUpgrade:0}|d${st.descuentoIdx}`; }
