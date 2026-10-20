@@ -404,20 +404,25 @@ function defaultConfig(){
       tarifas:{
         regular:{adulto:50, nino:30},
         premium:{adulto:60, nino:35},
-        ultra:{adulto:70, nino:40}
+        ultra:{adulto:70, nino:40},
+        // Pool Day Full Board (entre semana): adulto $35 y niño $25 CON impuestos = $28 y $20 sin impuestos.
+        fullboard:{adulto:28, nino:20}
       },
+      diasFullboard:[1,2,3,4], // lunes a jueves (sin feriados ni puentes)
       mascota:{pequena:20, grande:30},
-      horarios:{regular:'10h00 – 17h30', premium:'10h00 – 20h30', ultra:'10h00 – 00h00'},
+      horarios:{regular:'10h00 – 17h30', premium:'10h00 – 20h30', ultra:'10h00 – 00h00', fullboard:'10h00 – 17h30'},
       // Horarios oficiales por modalidad (hoja POOL DAY del tarifario). Regular no incluye cena.
       incluye:{
         regular:['Uso de instalaciones: 10h00 – 17h30','Snacks: 11h00 – 13h00 / 15h00 – 17h00','Bebidas soft y alcohólicas: 11h00 – 13h00 / 15h00 – 17h00','Almuerzo: 13h00 – 14h30','No incluye servicio de cena'],
         premium:['Uso de instalaciones: 10h00 – 20h30','Snacks: 11h00 – 13h00 / 15h00 – 19h00','Bebidas soft y alcohólicas: 11h00 – 13h00 / 15h00 – 19h00','Almuerzo: 13h00 – 14h30','Cena: 19h00 – 21h30'],
+        fullboard:['Uso de instalaciones: 10h00 – 17h30','Cóctel de bienvenida','Almuerzo: 13h00 – 14h30'],
         ultra:['Uso de instalaciones: 10h00 – 00h00','Snacks: 11h00 – 13h00 / 15h00 – 19h00','Bebidas soft y alcohólicas: 11h00 – 13h00 / 15h00 – 23h30','Almuerzo: 13h00 – 14h30','Cena: 19h00 – 21h30']
       },
       descripcion:{
         regular:'Uso de instalaciones, snacks, bebidas soft y alcohólicas y almuerzo, hasta las 17h30. No incluye servicio de cena.',
         premium:'Igual que el Regular, con horario extendido hasta las 20h30 e incluye cena.',
-        ultra:'Horario extendido hasta la medianoche (bebidas hasta las 23h30) e incluye cena.'
+        ultra:'Horario extendido hasta la medianoche (bebidas hasta las 23h30) e incluye cena.',
+        fullboard:'Incluye almuerzo y cóctel de bienvenida. Se ofrece de lunes a jueves.'
       }
     },
     feriadosFijos:[
@@ -591,6 +596,12 @@ function migrarConfig(cfg){
   if(cfg.puentesAuto===undefined){ cfg.puentesAuto = true; cambio = true; }
   { // Pool Day Regular en feriados y puentes + paquetes festivos del PDF actualizado
     const d1 = defaultConfig();
+    if(cfg.poolday){ const pd = cfg.poolday, dp = d1.poolday; // Pool Day Full Board
+      pd.tarifas = pd.tarifas || {}; if(!pd.tarifas.fullboard){ pd.tarifas.fullboard = dp.tarifas.fullboard; cambio = true; }
+      pd.horarios = pd.horarios || {}; if(!pd.horarios.fullboard){ pd.horarios.fullboard = dp.horarios.fullboard; cambio = true; }
+      pd.descripcion = pd.descripcion || {}; if(!pd.descripcion.fullboard){ pd.descripcion.fullboard = dp.descripcion.fullboard; cambio = true; }
+      pd.incluye = pd.incluye || {}; if(!pd.incluye.fullboard){ pd.incluye.fullboard = dp.incluye.fullboard; cambio = true; }
+      if(!pd.diasFullboard){ pd.diasFullboard = dp.diasFullboard; cambio = true; } }
     if(cfg.paquetesFestivos){ Object.keys(d1.paquetesFestivos).forEach(k=>{ const pk = cfg.paquetesFestivos[k]; if(pk && !pk.nocheEspecial){ pk.nocheEspecial = d1.paquetesFestivos[k].nocheEspecial; cambio = true; } }); }
     if(cfg.poolday && !cfg.poolday.tarifaFeriado){ cfg.poolday.tarifaFeriado = d1.poolday.tarifaFeriado; cambio = true; }
     const pf = cfg.paquetesFestivos;
@@ -1721,6 +1732,7 @@ function renderPoolDay(){
           <option value="regular" ${st.tipo==='regular'?'selected':''}>Regular</option>
           <option value="premium" ${st.tipo==='premium'?'selected':''}>Premium</option>
           <option value="ultra" ${st.tipo==='ultra'?'selected':''}>Ultra</option>
+          <option value="fullboard" ${st.tipo==='fullboard'?'selected':''}>Full Board (lunes a jueves)</option>
         </select>
         <div class="row">
           <div><label>Adultos</label><input type="number" min="0" id="p_adultos" value="${st.adultos}"></div>
@@ -2056,10 +2068,19 @@ function computePool(){
 
   document.getElementById('p_infoBadges').innerHTML =
     `<span class="badge ${badgeClass(info.tipo)}">${info.label}</span> `+
-    `<span class="tag">Tarifa ${st.tipo}${usaTarifaFeriado?' de feriado / puente':''}: ${money(adultoSin)} adulto · ${money(ninoSin)} niño (sin imp.)${(st.tipo==='regular' && !usaTarifaFeriado && tf0)?' — en feriados y puentes: '+money(tf0.adulto)+' adulto':''}</span>` +
+    `<span class="tag">Tarifa ${poolNombre(st.tipo)}${usaTarifaFeriado?' de feriado / puente':''}: ${money(adultoSin)} adulto · ${money(ninoSin)} niño (sin imp.)${(st.tipo==='regular' && !usaTarifaFeriado && tf0)?' — en feriados y puentes: '+money(tf0.adulto)+' adulto':''}</span>` +
     `<div class="small-note" style="margin-top:8px;">${CFG.poolday.descripcion[st.tipo]} Infantes: sin costo.</div>` +
     (info.tipo==='feriado' ? `<div class="warn" style="margin-top:8px;">La fecha corresponde a un feriado — revisa disponibilidad y capacidad del hotel para Pool Day en fechas de alta demanda.</div>` : '');
 
+
+  if(st.tipo==='fullboard' && !fullboardDisponible(fechaVisita, info)){
+    document.getElementById('p_result').innerHTML = `<div class="qd-header"><h1>Playa Paraíso</h1><div class="qd-sub">Pool Day Full Board</div></div>
+      <div class="qd-body"><div class="warn danger">El Pool Day Full Board se ofrece solo de lunes a jueves, sin feriados ni puentes. La fecha elegida (${fmtLong(fechaVisita)}) no está disponible para esta modalidad.</div>
+      <div class="small-note">Elige otra fecha entre lunes y jueves, o cotiza el Pool Day Regular, Premium o Ultra para esta fecha.</div></div>`;
+    document.getElementById('p_waText').value = '';
+    window.__blocksPoolday = null;
+    return;
+  }
 
   // Upselling Pool Day Regular → Day Use (verificado en correo de Maira, 29-sep-2026)
   const upsell = CFG.dayUse.upsellDesdePoolDay;
@@ -2107,7 +2128,7 @@ function computePool(){
       <div class="qd-clientline">Preparado para: <b>${st.clienteNombre || 'estimado(a) huésped'}</b></div>
       <div class="qd-cols">
         <div class="qd-col"><div class="qd-label">Fecha</div><div class="qd-val">${fmtLong(fechaVisita)}</div></div>
-        <div class="qd-col"><div class="qd-label">Tipo de Pool Day</div><div class="qd-val">${st.tipo.charAt(0).toUpperCase()+st.tipo.slice(1)}</div></div>
+        <div class="qd-col"><div class="qd-label">Tipo de Pool Day</div><div class="qd-val">${poolNombre(st.tipo)}</div></div>
         <div class="qd-col"><div class="qd-label">Horario de instalaciones</div><div class="qd-val">${CFG.poolday.horarios[st.tipo]}</div></div>
       </div>
       ${incluyeHtml(CFG.poolday.incluye[st.tipo], 'Tu Pool Day incluye')}
@@ -2135,7 +2156,7 @@ function computePool(){
     blocks.push({type:'meta', text:`N.º ${st.folio} · ${fmtLong(new Date())}`, color:'#7a6f6a'});
     blocks.push({type:'meta', text:`Preparado para: ${st.clienteNombre || 'estimado(a) huésped'}`});
     blocks.push({type:'divider'});
-    blocks.push({type:'item', label:`Pool Day ${st.tipo.charAt(0).toUpperCase()+st.tipo.slice(1)} · ${fmtLong(fechaVisita)}`, sub:`Adultos: ${st.adultos}${st.ninos?(' · Niños: '+st.ninos):''} · Horario: ${CFG.poolday.horarios[st.tipo]}`, price:money(st.adultos*adultoSin*taxFactor()+st.ninos*ninoSin*taxFactor())});
+    blocks.push({type:'item', label:`Pool Day ${poolNombre(st.tipo)} · ${fmtLong(fechaVisita)}`, sub:`Adultos: ${st.adultos}${st.ninos?(' · Niños: '+st.ninos):''} · Horario: ${CFG.poolday.horarios[st.tipo]}`, price:money(st.adultos*adultoSin*taxFactor()+st.ninos*ninoSin*taxFactor())});
     if(st.mascPeq) blocks.push({type:'item', label:`Mascota pequeña (${st.mascPeq})`, price:money(st.mascPeq*CFG.poolday.mascota.pequena*taxFactor())});
     if(st.mascGrande) blocks.push({type:'item', label:`Mascota grande (${st.mascGrande})`, price:money(st.mascGrande*CFG.poolday.mascota.grande*taxFactor())});
     if(upgradeCharge) blocks.push({type:'item', label:`Upgrade a Day Use (${st.habitacionesUpgrade} hab)`, price:money(upgradeCharge*taxFactor())});
@@ -2151,7 +2172,7 @@ function computePool(){
   let wa = `${saludoP}\n\n`;
   wa += `¡Gracias por su interés en nuestro Pool Day! 🌴 Le comparto el detalle:\n\n`;
   wa += `📅 *Fecha*: ${fmtLong(fechaVisita)}\n`;
-  wa += `🏖️ *Tipo*: Pool Day ${st.tipo.charAt(0).toUpperCase()+st.tipo.slice(1)}\n`;
+  wa += `🏖️ *Tipo*: Pool Day ${poolNombre(st.tipo)}\n`;
   wa += `⏰ *Horario de instalaciones*: ${CFG.poolday.horarios[st.tipo]}\n`;
   wa += `\n` + incluyeWa(CFG.poolday.incluye[st.tipo], 'Tu Pool Day incluye');
   wa += `👥 Adultos: ${st.adultos}   Niños (3-10 años): ${st.ninos}\n`;
@@ -2983,6 +3004,7 @@ function renderCfgPoolday(body){
   const filas = [
     ['Pool Day Regular', 'tarifas.regular'],
     ['Pool Day Regular — feriados y puentes', 'tarifaFeriado.regular'],
+    ['Pool Day Full Board (lunes a jueves; $28 / $20 sin imp. = $35 / $25 con imp.)', 'tarifas.fullboard'],
     ['Pool Day Premium', 'tarifas.premium'],
     ['Pool Day Ultra', 'tarifas.ultra']
   ];
@@ -3004,7 +3026,7 @@ function renderCfgPoolday(body){
   </div>`;
   html += `<div class="card"><h3>Qué incluye cada Pool Day (se muestra al cliente)</h3>
     <div class="small-note">Una línea por beneficio. Las líneas que empiezan con "No incluye" se muestran como exclusión.</div>
-    ${['regular','premium','ultra'].map(t=>`<label>Pool Day ${t.charAt(0).toUpperCase()+t.slice(1)}</label><textarea rows="5" class="cfg-pdi" data-t="${t}">${(CFG.poolday.incluye[t]||[]).join('\n')}</textarea>`).join('')}
+    ${['regular','premium','ultra','fullboard'].map(t=>`<label>Pool Day ${poolNombre(t)}</label><textarea rows="5" class="cfg-pdi" data-t="${t}">${(CFG.poolday.incluye[t]||[]).join('\n')}</textarea>`).join('')}
   </div>`;
   body.innerHTML = html;
   body.querySelectorAll('.cfg-pdi').forEach(ta=> ta.onchange = e=>{ CFG.poolday.incluye[e.target.dataset.t] = e.target.value.split('\n').map(s=>s.trim()).filter(Boolean); });
@@ -3503,6 +3525,10 @@ function normUser(u){ return String(u||'').trim().replace(/^(https?:\/\/)?(www\.
 function claveCliente(x){ const c = canalDe(x); if(c==='tel'){ const t = normTel(x.telefono); return t.length>=8 ? 'tel:'+t : ''; } if(c==='em'){ const e = normCorreo(x.usuarioRed); return RE_CORREO.test(e) ? 'em:'+e : ''; } const u = normUser(x.usuarioRed); return u.length>=2 ? c+':'+u : ''; }
 function etiquetaCliente(x){ const c = canalDe(x); return c==='tel' ? normTel(x.telefono) : (c==='em' ? normCorreo(x.usuarioRed) : `${CANAL_LABEL[c]} @${normUser(x.usuarioRed)}`); }
 function claveDeRegistro(r){ return r.clave || (normTel(r.telefono).length>=8 ? 'tel:'+normTel(r.telefono) : ''); }
+const POOL_NOMBRE = {regular:'Regular', premium:'Premium', ultra:'Ultra', fullboard:'Full Board'};
+function poolNombre(t){ return POOL_NOMBRE[t] || (String(t).charAt(0).toUpperCase()+String(t).slice(1)); }
+// El Pool Day Full Board se ofrece entre semana: lunes a jueves, sin feriados ni puentes.
+function fullboardDisponible(fecha, info){ return (CFG.poolday.diasFullboard||[1,2,3,4]).includes(fecha.getDay()) && info.tipo!=='feriado'; }
 function normTel(t){ let d = String(t||'').replace(/\D/g,''); if(d.startsWith('593')) d = d.slice(3); if(d.startsWith('0')) d = d.slice(1); return d; }
 
 const DEMO = /[?&]demo=1/.test(location.search); // modo demostración: datos locales, sin Microsoft
