@@ -302,7 +302,7 @@ function defaultConfig(){
   return {
     taxes:{ iva:15, servicio:10 },
     checkIn:'15h00', checkOut:'12h00',
-    politicaHospedaje:'Esta cotización tiene una validez de 24 horas. Para confirmar la reserva se solicita el 50% de garantía (transferencia, depósito o tarjeta de crédito); el saldo se cancela al check-in. Los valores abonados no son reembolsables.',
+    politicaHospedaje:'Esta cotización tiene una validez de 24 horas. Para confirmar la reserva se solicita el 50% de garantía (transferencia, depósito o tarjeta de crédito); el saldo se cancela al check-in.',
     politicaPoolday:'Las reservas no aplican reembolso. Se permite un cambio de fecha con mínimo 24 horas de anticipación (aplica una sola vez). Para confirmar se solicita el 50% o 100% de pago previo (Payphone, depósito o transferencia).',
     extraPersonaPorNoche: [100, 80, 60], // persona extra por noche (sin impuestos): tres valores a elegir, sin ligarse a plan ni habitación
     mascotaPorNoche: { pequena:25, grande:30 },
@@ -453,6 +453,12 @@ function defaultConfig(){
     temporadaCalendario:{}, // ajustes manuales de un día puntual: { 'YYYY-MM-DD': 'alta'|'baja'|'especial' }
     incluirMoviles:true,
     puentesAuto:true, // los días puente (fines de semana largos) llevan tarifa de feriado
+    // Planes que se pueden cotizar según el día (y, si se quiere, la temporada). Todo Incluido siempre está disponible.
+    // Los feriados incluyen los días puente. 'temporadas' permite reglas propias: { alta:{...}, baja:{...}, especial:{...} }.
+    planesPermitidos:{
+      base:{ dom:['BB','FB','AI'], lun:['BB','FB','AI'], mar:['BB','FB','AI'], mie:['BB','FB','AI'], jue:['BB','FB','AI'], vie:['AI'], sab:['AI'], feriado:['AI'] },
+      temporadas:{}
+    },
     feriadosCustom:[
       // Puentes/feriados "empaquetados" que pidió Maira (correo 29-sep-2026): el hotel tarifica
       // todo el fin de semana conectado al feriado legal, no solo el día del feriado.
@@ -594,6 +600,9 @@ function migrarConfig(cfg){
   }
   if(!cfg.usuariosCot){ cfg.usuariosCot = usuariosPorDefecto(); cambio = true; }
   if(cfg.puentesAuto===undefined){ cfg.puentesAuto = true; cambio = true; }
+  if(!cfg.planesPermitidos){ cfg.planesPermitidos = defaultConfig().planesPermitidos; cambio = true; }
+  if(typeof cfg.politicaHospedaje==='string' && /Los valores abonados no son reembolsables/.test(cfg.politicaHospedaje)){ // leyenda retirada de las cotizaciones
+    cfg.politicaHospedaje = cfg.politicaHospedaje.replace(/\s*Los valores abonados no son reembolsables\.?/,'').trim(); cambio = true; }
   { // Pool Day Regular en feriados y puentes + paquetes festivos del PDF actualizado
     const d1 = defaultConfig();
     if(cfg.poolday){ const pd = cfg.poolday, dp = d1.poolday; // Pool Day Full Board
@@ -937,6 +946,96 @@ function removeLineaHospedaje(st, id){
 function lineaTotalSinImpuestos(st, linea){
   return planTotalSinImpuestos(st.fecha, st.noches, linea.categoria, st.promocionManual, linea.tipoHab, linea.ocupacion, linea.plan, linea.rackTipo);
 }
+// ---------- Planes por día y temporada (configurable en Calendario & Tarifas → Planes por día) ----------
+const DIAS_KEY = ['dom','lun','mar','mie','jue','vie','sab'];
+const PLAN_LBL = {BB:'Bed & Breakfast', FB:'Full Board', AI:'All Inclusive'};
+function planesNoche(d){
+  const PP = CFG.planesPermitidos || {}; const info = getDayInfo(d);
+  const k = info.tipo==='feriado' ? 'feriado' : DIAS_KEY[d.getDay()];
+  const m = (PP.temporadas && PP.temporadas[seasonFor(d)]) || PP.base || {};
+  const arr = m[k] || ['AI']; return arr.includes('AI') ? arr : arr.concat('AI');
+}
+function planPermitidoNoche(plan, d){ return plan==='AI' || planesNoche(d).includes(plan); }
+function planesEstadia(fechaStr, noches){
+  const ini = parseYMD(fechaStr);
+  return ['BB','FB','AI'].filter(pl=>{ for(let i=0;i<noches;i++){ if(!planPermitidoNoche(pl, addDays(ini,i))) return false; } return true; });
+}
+const PLAN_TI = {BB:'Bed & Breakfast', FB:'Full Board', AI:'Todo Incluido'};
+const DN_CORTO = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+function fechaCorta(d){ return DN_CORTO[d.getDay()]+' '+pad2(d.getDate())+'/'+pad2(d.getMonth()+1); }
+// Plan efectivo de cada noche de una habitación: el elegido si ese día aplica, y Todo Incluido si no (mix de planes).
+function nochesPlanLinea(st, linea){
+  const ini = parseYMD(st.fecha), out = [];
+  for(let i=0;i<st.noches;i++){ const d = addDays(ini,i); out.push({d, plan: linea.categoria==='rack' ? 'AI' : (planPermitidoNoche(linea.plan,d) ? linea.plan : 'AI')}); }
+  return out;
+}
+function esMixLinea(st, l){ return l.categoria!=='rack' && new Set(nochesPlanLinea(st,l).map(x=>x.plan)).size>1; }
+function gruposPlanLinea(st, l){
+  const g = []; nochesPlanLinea(st,l).forEach(({d,plan})=>{ const u = g[g.length-1]; if(u && u.plan===plan){ u.noches++; u.fin = d; } else g.push({plan, ini:d, fin:d, noches:1}); });
+  return g;
+}
+function rangoGrupo(g){ return g.noches===1 ? fechaCorta(g.ini)+' (1 noche)' : fechaCorta(g.ini)+' a '+fechaCorta(g.fin)+' ('+g.noches+' noches)'; }
+function planEtq(st, l){
+  if(l.categoria==='rack') return 'Todo Incluido';
+  const pl = [...new Set(nochesPlanLinea(st,l).map(x=>x.plan))];
+  return pl.length>1 ? pl.map(x=>PLAN_TI[x]).join(' + ')+' (combinado)' : PLAN_TI[pl[0]];
+}
+// Detalle por noche de las habitaciones con plan combinado: qué incluye cada noche y cuánto vale (sin impuestos).
+function detalleMixLineas(st){
+  return st.lineas.filter(l=>esMixLinea(st,l)).map(l=>({ linea:l, grupos:gruposPlanLinea(st,l).map(g=>({ plan:g.plan, rango:rangoGrupo(g),
+    sin: planTotalSinImpuestos(fmtYMD(g.ini), g.noches, l.categoria, st.promocionManual, l.tipoHab, l.ocupacion, l.plan, l.rackTipo),
+    incluye: (CFG.inclusiones[g.plan]||[]) })) }));
+}
+function mixHtmlHosp(det){
+  const tf = taxFactor();
+  return `<div class="qd-section-title">Qué incluye cada noche</div>`+det.map(({linea,grupos})=>`<div style="font-weight:700; margin:8px 0 4px;">${linea.label} · ${linea.ocupacion} persona${linea.ocupacion>1?'s':''}</div>`+grupos.map(g=>`<div style="border:1px solid #E7D9C6; border-radius:8px; padding:8px 10px; margin-bottom:6px;"><div style="display:flex; justify-content:space-between; gap:8px; font-weight:700;"><span>${g.rango} · ${PLAN_TI[g.plan]}</span><span>${money(g.sin*tf)}</span></div><div style="font-size:12.5px; color:#5b4d3e; margin-top:3px;">${g.incluye.join(' · ')}</div></div>`).join('')).join('');
+}
+// Habilita en el selector los planes que aplican al menos una noche de la estadía; en las noches donde no aplica, rige Todo Incluido.
+function aplicarReglaPlanes(st){
+  if(st.categoria==='festivo') return;
+  const sel = document.getElementById('h_plan'), nota = document.getElementById('h_planNota'), ini = parseYMD(st.fecha);
+  const alguna = pl=>{ for(let i=0;i<st.noches;i++){ if(planPermitidoNoche(pl, addDays(ini,i))) return true; } return false; };
+  const ok = ['BB','FB','AI'].filter(alguna);
+  if(sel){ [...sel.options].forEach(o=>{ const v = ok.includes(o.value); o.disabled = !v; o.textContent = PLAN_LBL[o.value] + (v ? '' : ' (no aplica en estas fechas)'); }); }
+  const cambiadas = [];
+  if(!ok.includes(st.plan)){ st.plan = 'AI'; if(sel) sel.value = 'AI'; }
+  (st.lineas||[]).forEach(l=>{ if(l.categoria!=='rack' && !ok.includes(l.plan)){ cambiadas.push(l.label); l.plan = 'AI'; } });
+  if(nota){
+    const noches = []; for(let i=0;i<st.noches;i++) noches.push(addDays(ini,i));
+    const sinPlan = noches.filter(d=>!planPermitidoNoche(st.plan,d));
+    if(ok.length===1){
+      nota.innerHTML = 'Para estas fechas solo aplica: <b>'+ok.map(x=>PLAN_LBL[x]).join(' y ')+'</b>. Los otros planes no se ofrecen: '+noches.filter(d=>['BB','FB'].some(pl=>!planPermitidoNoche(pl,d))).map(d=>fechaCorta(d)+(getDayInfo(d).tipo==='feriado'?' (feriado)':'')).join(', ')+'.';
+    } else if(st.plan!=='AI' && sinPlan.length){
+      nota.innerHTML = '<b>Plan combinado:</b> '+PLAN_LBL[st.plan]+' las noches de '+noches.filter(d=>planPermitidoNoche(st.plan,d)).map(fechaCorta).join(', ')+' y All Inclusive la noche de '+sinPlan.map(d=>fechaCorta(d)+(getDayInfo(d).tipo==='feriado'?' (feriado)':'')).join(', ')+'. En la cotización se detalla qué incluye cada noche.';
+    } else nota.textContent = '';
+  }
+  if(cambiadas.length) showToast('Se cambió a All Inclusive: el plan elegido no aplica en las fechas de '+cambiadas.join(', '));
+}
+// Tarifa por fecha de llegada: 7 fechas con la fecha pedida en el centro (3 antes y 3 después). Cada una muestra el valor
+// del hospedaje de la cotización (misma habitación y mismas noches, impuestos incluidos); las fechas pasadas no están disponibles.
+function tiraFechasHosp(st){
+  if(st.categoria==='festivo' || st.promocionManual || !(st.lineas||[]).some(l=>l.categoria!=='rack')) return null;
+  const tf = taxFactor(), inicio = parseYMD(st.fecha), hoy = new Date(); hoy.setHours(0,0,0,0);
+  const DN = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'], MES = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'], items = [];
+  for(let i=-3;i<=3;i++){
+    const d = addDays(inicio,i), pasada = i!==0 && d.getTime()<hoy.getTime();
+    const tot = pasada ? null : st.lineas.reduce((s,l)=> s + planTotalSinImpuestos(fmtYMD(d), st.noches, l.categoria, st.promocionManual, l.tipoHab, l.ocupacion, l.plan, l.rackTipo), 0);
+    const n = d.getDate()+(d.getDate()===1?' '+MES[d.getMonth()]:'');
+    const soloAI = tot!==null && st.lineas.some(l=>l.categoria!=='rack' && l.plan!=='AI' && Array.from({length:st.noches},(_,k)=>!planPermitidoNoche(l.plan, addDays(d,k))).some(Boolean));
+    items.push({dia:DN[d.getDay()], n, lbl:DN[d.getDay()]+' '+n, txt: tot===null?'No disp.':money(tot*tf)+(soloAI?'*':''), nd: tot===null, sel: i===0, star: soloAI});
+  }
+  return items;
+}
+const TIRA_NOTA = 'Valor del hospedaje si cambias la fecha de llegada, para la misma habitación y el mismo número de noches (impuestos incluidos).';
+function tiraNotaCompleta(tira){ return TIRA_NOTA + ((tira||[]).some(t=>t.star) ? ' * Incluye noches en All Inclusive: en esos días no aplican los otros planes.' : ''); }
+function tiraHtmlHosp(tira){
+  if(!tira) return '';
+  return `<div class="qd-section-title">Tarifa por fecha de llegada</div>
+      <div style="display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:3px;">
+        ${tira.map(t=>`<div style="border:${t.sel?'2px solid #B8102E':'1px solid #E7D9C6'}; border-radius:8px; padding:6px 0; text-align:center; line-height:1.3; min-width:0; overflow:hidden;"><div style="font-size:10px; color:#7a6a58;">${t.dia}</div><div style="font-size:12.5px; font-weight:700;">${t.n}</div><div style="font-size:${t.nd?'8.5':'9.5'}px; letter-spacing:-0.3px; font-weight:700; margin-top:5px; white-space:nowrap; color:${t.nd?'#9a8a78':'inherit'};">${t.txt}</div></div>`).join('')}
+      </div>
+      <div class="small-note" style="margin-top:6px;">${tiraNotaCompleta(tira)}</div>`;
+}
 function renderLineasCard(st){
   const card = document.getElementById('h_lineasCard');
   const list = document.getElementById('h_lineasList');
@@ -1034,6 +1133,7 @@ function renderHospedaje(){
                   </select>
                 </div>
               </div>
+              <div class="small-note" id="h_planNota" style="margin-top:6px;"></div>
             </div>
             <div id="h_rackNote" class="small-note">Tarifa Rack Todo Incluido. Es fija: no varía por día de la semana ni por feriado.</div>
 
@@ -1212,12 +1312,14 @@ function planTotalSinImpuestos(fechaInicioStr, numNoches, categoria, promocionMa
     const info = getDayInfo(d);
     const season = seasonFor(d);
     let tarifa;
+    // Los planes que aplican cada noche se configuran en 'Planes por día'; por defecto Bed & Breakfast y Full Board no aplican viernes, sábado ni feriados.
+    const planNoche = planPermitidoNoche(plan, d) ? plan : 'AI'; // si una regla no permite el plan esa noche, rige Todo Incluido
     if(categoria==='rack'){ tarifa = CFG.rack[rackTipo]; }
     // Los tarifarios de Temporada Baja y Promoción solo rigen de domingo a jueves; viernes, sábado
     // y feriados siempre llevan la tarifa Regular que corresponde a ese día.
-    else if(promocionManual && info.tipo==='entre_semana'){ tarifa = CFG.hospedaje.promocion[tipoHab][ocupacion][plan]; }
-    else if(season==='baja' && !promocionManual && info.tipo==='entre_semana'){ tarifa = CFG.hospedaje.temporada_baja[tipoHab][ocupacion][plan]; }
-    else { tarifa = CFG.hospedaje.regular[info.tipo][tipoHab][ocupacion][plan]; }
+    else if(promocionManual && info.tipo==='entre_semana'){ tarifa = CFG.hospedaje.promocion[tipoHab][ocupacion][planNoche]; }
+    else if(season==='baja' && !promocionManual && info.tipo==='entre_semana'){ tarifa = CFG.hospedaje.temporada_baja[tipoHab][ocupacion][planNoche]; }
+    else { tarifa = CFG.hospedaje.regular[info.tipo][tipoHab][ocupacion][planNoche]; }
     total += tarifa;
   }
   return total;
@@ -1424,6 +1526,7 @@ function computeHospedajeFestivo(st){
 function computeHospedaje(){
   const st = hospedajeState();
   if(st.categoria==='festivo'){ computeHospedajeFestivo(st); return; }
+  aplicarReglaPlanes(st);
   const inicio = parseYMD(st.fecha);
 
   // Noches compartidas por todas las habitaciones de esta cotización (mismas fechas para todas).
@@ -1474,6 +1577,8 @@ function computeHospedaje(){
 
   const lineasConTotal = st.lineas.map(l=>({ linea:l, sinImp: lineaTotalSinImpuestos(st,l) }));
   const subtotalHab = lineasConTotal.reduce((s,x)=>s+x.sinImp, 0);
+  const tira = tiraFechasHosp(st);
+  const politicaH = CFG.politicaHospedaje;
 
   const cargoPersonaExtra = pexPorNoche(st) * st.noches;
   const cargoMascotas = (st.mascPeq*CFG.mascotaPorNoche.pequena + st.mascGrande*CFG.mascotaPorNoche.grande) * st.noches;
@@ -1502,6 +1607,8 @@ function computeHospedaje(){
   const total = baseConDescuento + iva + servicio + cargoExtrasFlat;
 
   const planLbl = {BB:'Bed & Breakfast',FB:'Full Board',AI:'Todo Incluido'};
+  const hayMix = st.lineas.some(l=>esMixLinea(st,l)); // alguna habitación combina planes según el día
+  const detMix = hayMix ? detalleMixLineas(st) : [];
 
   // Mensaje persuasivo + comparación con Todo Incluido (solo cuando todas las líneas son
   // estándar y comparten el mismo plan; si se mezclan tipos/planes, usamos un mensaje genérico).
@@ -1521,7 +1628,10 @@ function computeHospedaje(){
   }
 
   let titular, cuerpo;
-  if(planComun==='AI'){
+  if(hayMix){
+    titular = 'Tu estadía combina planes';
+    cuerpo = 'Cada noche incluye lo que se detalla a continuación, según el plan que aplica ese día.';
+  } else if(planComun==='AI'){
     titular = 'Más playa. Menos cuentas.';
     cuerpo = 'Tu plan reúne alojamiento, comidas, snacks y bebidas incluidas — todo lo que necesitas para disfrutar tu escapada, sin sumar cuentas por separado.';
   } else if(planComun==='FB' || planComun==='BB'){
@@ -1532,7 +1642,7 @@ function computeHospedaje(){
     cuerpo = 'Aquí tienes el detalle de las habitaciones que armamos para tu grupo.';
   }
   const primerNombre = st.clienteNombre ? st.clienteNombre.split(' ')[0] : '';
-  const inclusiones = planComun ? (CFG.inclusiones[planComun] || []) : [];
+  const inclusiones = (planComun && !hayMix) ? (CFG.inclusiones[planComun] || []) : [];
   const horario = planComun==='AI' ? CFG.horarioAI : null;
 
   let upsellHtml = '';
@@ -1579,7 +1689,7 @@ function computeHospedaje(){
       <div style="font-family:Georgia,serif; font-size:19px; color:var(--sd-primary,var(--deep2)); font-weight:700; margin-bottom:4px;">${titular}</div>
       <div class="qd-clientline" style="margin-bottom:12px;">${primerNombre?('¡Hola, '+primerNombre+'! '):''}${cuerpo}</div>`;
   lineasConTotal.forEach(({linea})=>{
-    const sub = linea.categoria==='rack' ? 'Todo Incluido' : `${linea.ocupacion} persona${linea.ocupacion>1?'s':''} · ${planLbl[linea.plan]}`;
+    const sub = (linea.categoria==='rack' ? 'Todo Incluido' : `${linea.ocupacion} persona${linea.ocupacion>1?'s':''} · ${planEtq(st, linea)}`);
     html += `<div class="line-item" style="margin-bottom:8px;">${linea.img?`<img src="${linea.img}" alt="${linea.label}">`:''}<div class="li-info"><b>${linea.label}</b><span>${sub}</span></div></div>`;
   });
   html += `
@@ -1588,6 +1698,7 @@ function computeHospedaje(){
         <div class="qd-col"><div class="qd-label">Check-out</div><div class="qd-val">${fmtLong(addDays(inicio,st.noches))}<br><span class="muted">hasta las ${CFG.checkOut}</span></div></div>
         <div class="qd-col"><div class="qd-label">Noches</div><div class="qd-val">${st.noches}</div></div>
       </div>`;
+  if(hayMix){ html += mixHtmlHosp(detMix); }
   if(inclusiones.length){
     html += `<div class="qd-section-title">Esto vas a disfrutar</div>
       <div style="display:flex; flex-wrap:wrap; gap:6px 18px; font-size:13px; margin-bottom:2px;">
@@ -1612,10 +1723,11 @@ function computeHospedaje(){
         <span class="amt">${money(st.mostrarSinImp?baseConDescuento+cargoExtrasFlat:total)}</span>
       </div>
       ${upsellHtml}
+      ${tiraHtmlHosp(tira)}
       ${planComun?buildFinanciamientoHTML(planComun, total):''}
       ${cta}
     </div>
-    <div class="qd-footer"><span class="qd-folio">${st.folio}</span>Cotización emitida el ${fmtLong(new Date())}. ${CFG.politicaHospedaje}</div>
+    <div class="qd-footer"><span class="qd-folio">${st.folio}</span>Cotización emitida el ${fmtLong(new Date())}. ${politicaH}</div>
   `;
   const _hr = document.getElementById('h_result');
   _hr.style.cssText = `--sd-primary:${CFG.brand.primary}; --sd-primary2:${CFG.brand.primary2}; --sd-accent:${CFG.brand.accent};`;
@@ -1627,7 +1739,7 @@ function computeHospedaje(){
     blocks.push({type:'meta', text:`N.º ${st.folio} · ${fmtLong(new Date())}`, color:'#7a6f6a'});
     blocks.push({type:'meta', text:st.clienteNombre ? `Preparado para ${st.clienteNombre}` : 'Tu cotización personalizada'});
     lineasConTotal.forEach(({linea})=>{
-      const sub = linea.categoria==='rack' ? 'Todo Incluido' : `${linea.ocupacion} persona${linea.ocupacion>1?'s':''} · ${planLbl[linea.plan]}`;
+      const sub = (linea.categoria==='rack' ? 'Todo Incluido' : `${linea.ocupacion} persona${linea.ocupacion>1?'s':''} · ${planEtq(st, linea)}`);
       blocks.push({type:'roomitem', label:linea.label, sub: sub + (linea.ref ? ' · Foto referencial' : ''), price:'', imgSrc:linea.img});
     });
     blocks.push({type:'item', label:titular, sub:cuerpo, price:''});
@@ -1636,6 +1748,7 @@ function computeHospedaje(){
       {label:'Check-out', value:`${fmtLong(addDays(inicio,st.noches))} · hasta ${CFG.checkOut}`},
       {label:'Noches', value:`${st.noches}`}
     ]});
+    if(hayMix){ blocks.push({type:'sectiontitle', text:'Qué incluye cada noche'}); detMix.forEach(({linea,grupos})=>grupos.forEach(g=>blocks.push({type:'item', label:linea.label+' · '+g.rango+' · '+PLAN_TI[g.plan], sub:g.incluye.join(' · '), price:money(g.sin*taxFactor())}))); }
     if(inclusiones.length){
       blocks.push({type:'sectiontitle', text:'Esto vas a disfrutar'});
       blocks.push({type:'checklist', items:inclusiones});
@@ -1652,7 +1765,8 @@ function computeHospedaje(){
     if(diffAI!=null && diffAI>0){
       blocks.push({type:'upsell', tag:'Opcional · Mejora tu plan', label:'Cambia todas tus habitaciones a Todo Incluido', sub:'Mismos cuartos y fechas.', price:'+'+money(diffAI)});
     }
-    blocks.push({type:'footer', lines:['## Condiciones', CFG.politicaHospedaje]});
+    if(tira){ blocks.push({type:'sectiontitle', text:'Tarifa por fecha de llegada'}); blocks.push({type:'calendar', items:tira, caption:tiraNotaCompleta(tira)}); }
+    blocks.push({type:'footer', lines:['## Condiciones', politicaH]});
     window.__blocksHospedaje = blocks;
   }
 
@@ -1666,10 +1780,11 @@ function computeHospedaje(){
   wa += `${st.noches} noche${st.noches>1?'s':''}\n\n`;
   wa += `🏨 *Alojamiento*\n`;
   lineasConTotal.forEach(({linea,sinImp})=>{
-    const sub = linea.categoria==='rack' ? 'Todo Incluido' : `${linea.ocupacion} persona${linea.ocupacion>1?'s':''} · Plan ${planLbl[linea.plan]}`;
+    const sub = (linea.categoria==='rack' ? 'Todo Incluido' : `${linea.ocupacion} persona${linea.ocupacion>1?'s':''} · Plan ${planEtq(st, linea)}`);
     wa += `• ${linea.label} — ${sub}: ${money(sinImp*taxFactor())}\n`;
   });
   wa += `\n`;
+  if(hayMix){ wa += `🗓️ *Qué incluye cada noche*\n`; detMix.forEach(({linea,grupos})=>grupos.forEach(g=>{ wa += `• ${linea.label} — ${g.rango} · ${PLAN_TI[g.plan]}: ${money(g.sin*taxFactor())}\n   Incluye: ${g.incluye.join(', ')}\n`; })); }
   wa += incluyeWa(inclusiones, 'Tu plan incluye'); // la misma lista que ve el cliente en la tarjeta y en el PDF
   if(pexPorNoche(st)) wa += pexTextoWa(st, taxFactor());
   if(st.mascPeq) wa += `Mascota raza pequeña: ${st.mascPeq} × ${money(CFG.mascotaPorNoche.pequena*taxFactor())}/noche\n`;
@@ -1680,7 +1795,8 @@ function computeHospedaje(){
   if(descuentoMonto>0) wa += `Descuento (${descLabel}): -${money(descuentoMonto*taxFactor())}\n`;
   wa += `*TOTAL A PAGAR (incluye impuestos): ${money(total)}*\n`;
   wa += `Valores expresados en USD (dólares de los Estados Unidos).\n\n`;
-  wa += `📌 ${CFG.politicaHospedaje}\n\n`;
+  if(tira) wa += `📅 *Tarifa por fecha de llegada* (hospedaje, impuestos incluidos)\n${tira.filter(t=>!t.nd).map(t=>`${t.lbl}: ${t.txt}`).join(' · ')}\n\n`;
+  wa += `📌 ${politicaH}\n\n`;
   wa += `Quedamos atentos para coordinar los siguientes pasos. ¡Será un gusto recibirle en Playa Paraíso! 😊`;
   document.getElementById('h_waText').value = wa;
 }
@@ -2242,7 +2358,7 @@ function getRoomCards(){
 /* ===== Motor de exportación: dibuja la cotización en un canvas y genera JPG o PDF de una sola página,
    sin depender de window.print() ni de librerías externas (100% autocontenido). ===== */
 const BRAND = { maroon:"#402021", cherry:"#C20F2F", ink:"#2b1c1c", gray:"#7a6f6a", line:"#e7ddd2", thumbBg:"#f1e9de" };
-const THUMB_W = 96, THUMB_H = 64, THUMB_GAP = 16;
+const THUMB_W = 88, THUMB_H = 60, THUMB_GAP = 14;
 
 function wrapText(ctx, text, maxWidth){
   const words = String(text).split(" ");
@@ -2292,7 +2408,7 @@ async function preloadBlockImages(blocks){
 }
 
 function layoutQuoteImage(ctx, blocks, width){
-  const pad = 44;
+  const pad = 32;
   const contentW = width - pad*2;
   const headerH = 118;
   let y = headerH + 30;
@@ -2300,24 +2416,24 @@ function layoutQuoteImage(ctx, blocks, width){
 
   blocks.forEach(b=>{
     if(b.type==="meta"){
-      ctx.font = "600 15px 'Work Sans'";
-      ops.push({ type:"meta", text:b.text, color:b.color, y }); y += 26;
+      ctx.font = "600 17px 'Work Sans'";
+      ops.push({ type:"meta", text:b.text, color:b.color, y }); y += 30;
     } else if(b.type==="item"){
-      ctx.font = "600 16px 'Work Sans'";
+      ctx.font = "700 19px 'Work Sans'";
       const priceW = ctx.measureText(b.price).width;
       const labelLines = wrapText(ctx, b.label, contentW - priceW - 24);
-      ctx.font = "400 13px 'Work Sans'";
+      ctx.font = "500 15.5px 'Work Sans'";
       const subLines = b.sub ? wrapText(ctx, b.sub, contentW - priceW - 24) : [];
       ops.push({ type:"item", label:b.label, sub:b.sub, price:b.price, y, labelLines, subLines });
-      y += 22*labelLines.length + (subLines.length ? 18*subLines.length : 0) + 14;
+      y += 26*labelLines.length + (subLines.length ? 21*subLines.length : 0) + 14;
     } else if(b.type==="roomitem"){
       const textX0 = THUMB_W + THUMB_GAP;
-      ctx.font = "600 16px 'Work Sans'";
+      ctx.font = "700 19px 'Work Sans'";
       const priceW = ctx.measureText(b.price).width;
       const labelLines = wrapText(ctx, b.label, contentW - textX0 - priceW - 24);
-      ctx.font = "400 13px 'Work Sans'";
+      ctx.font = "500 15.5px 'Work Sans'";
       const subLines = b.sub ? wrapText(ctx, b.sub, contentW - textX0 - priceW - 24) : [];
-      const textH = 22*labelLines.length + (subLines.length ? 18*subLines.length : 0);
+      const textH = 26*labelLines.length + (subLines.length ? 21*subLines.length : 0);
       const rowH = Math.max(THUMB_H, textH) + 16;
       ops.push({ type:"roomitem", label:b.label, sub:b.sub, price:b.price, imgSrc:b.imgSrc, y, labelLines, subLines, textX0, rowH });
       y += rowH;
@@ -2325,48 +2441,62 @@ function layoutQuoteImage(ctx, blocks, width){
       y += 10;
       ops.push({ type:"divider", y });
       y += 14;
+    } else if(b.type==="calendar"){
+      const nT = b.items.length, gap = 4, tileW = (contentW - gap*(nT-1))/nT, tileH = 74;
+      ctx.font = "500 13.5px 'Work Sans'";
+      const capLines = b.caption ? wrapText(ctx, b.caption, contentW) : [];
+      ops.push({ type:"calendar", items:b.items, y, tileW, tileH, gap, capLines });
+      y += tileH + 10 + capLines.length*19 + 12;
     } else if(b.type==="cols"){
-      ctx.font = "400 13px 'Work Sans'";
-      const colW = contentW / b.items.length;
-      let maxLines = 1;
-      const measured = b.items.map(it=>{
-        const lines = wrapText(ctx, it.value, colW-16);
-        maxLines = Math.max(maxLines, lines.length);
-        return lines;
+      const gap = 8, nC = b.items.length, pesos = b.items.map(it=>/noche|persona/i.test(it.label)?0.7:1), sumP = pesos.reduce((s,x)=>s+x,0);
+      let x0 = pad, boxH = 0;
+      const boxes = b.items.map((it,idx)=>{
+        const w = (contentW - gap*(nC-1)) * pesos[idx]/sumP; const partes = String(it.value).split(' · ');
+        ctx.font = "600 17px 'Work Sans'"; const main = wrapText(ctx, partes[0], w-24);
+        ctx.font = "700 19px 'Work Sans'"; const sub = partes.length>1 ? wrapText(ctx, partes.slice(1).join(' · '), w-24) : [];
+        boxH = Math.max(boxH, 40 + 24*main.length + 25*sub.length + 10);
+        const bx = {x:x0, w, main, sub}; x0 += w + gap; return bx;
       });
-      ops.push({ type:"cols", items:b.items, measured, y, colW });
-      y += 30 + maxLines*18 + 10;
+      ops.push({ type:"cols", items:b.items, boxes, y, boxH });
+      y += boxH + 16;
     } else if(b.type==="sectiontitle"){
-      y += 6;
+      y += 12;
       ops.push({ type:"sectiontitle", text:b.text, y });
-      y += 24;
+      y += 32;
     } else if(b.type==="checklist"){
-      ctx.font = "400 13.5px 'Work Sans'";
-      const rows = b.items.map(text=>wrapText(ctx, text, contentW-24));
+      ctx.font = "500 17px 'Work Sans'";
+      const rows = b.items.map(text=>wrapText(ctx, text, contentW-30));
       ops.push({ type:"checklist", rows, y });
-      rows.forEach(lines=>{ y += 20*lines.length; });
+      rows.forEach(lines=>{ y += 25*lines.length + 3; });
       y += 8;
     } else if(b.type==="upsell"){
-      ctx.font = "700 15px 'Work Sans'";
+      ctx.font = "700 20px 'Work Sans'";
       const priceW = ctx.measureText(b.price||"").width;
+      ctx.font = "700 17px 'Work Sans'";
       const labelLines = wrapText(ctx, b.label, contentW-32-priceW-20);
-      ctx.font = "400 12.5px 'Work Sans'";
+      ctx.font = "500 14.5px 'Work Sans'";
       const subLines = b.sub ? wrapText(ctx, b.sub, contentW-32-priceW-20) : [];
-      const innerH = 22 + 19*labelLines.length + (subLines.length?16*subLines.length:0);
-      const boxH = Math.max(innerH+16, 58);
+      const innerH = 28 + 23*labelLines.length + (subLines.length?19*subLines.length:0);
+      const boxH = Math.max(innerH+18, 76);
       ops.push({ type:"upsell", tag:b.tag, label:b.label, sub:b.sub, price:b.price, labelLines, subLines, y, boxH });
       y += boxH + 14;
     } else if(b.type==="total"){
-      if(b.big){ y += 6; ops.push({ type:"total", label:b.label, value:b.value, big:true, color:b.color, y }); y += 54 + 12; }
+      if(b.big){ y += 8; ops.push({ type:"total", label:b.label, value:b.value, big:true, color:b.color, y }); y += 72 + 14; }
       else { ops.push({ type:"total", label:b.label, value:b.value, big:false, color:b.color, y }); y += 24; }
     } else if(b.type==="footer"){
-      y += 18;
+      y += 26;
       b.lines.forEach(line=>{
-        if(line===""){ y += 8; return; }
+        if(line===""){ y += 10; return; }
         const isHeader = line.startsWith("## ");
         const text = isHeader ? line.slice(3) : line;
-        ctx.font = isHeader ? "700 12.5px 'Work Sans'" : "400 12px 'Work Sans'";
-        wrapText(ctx, text, contentW).forEach(wl=>{ ops.push({ type:"footerline", text:wl, y, bold:isHeader }); y += isHeader ? 18 : 17; });
+        if(isHeader){
+          ctx.font = "700 20px 'Work Sans'";
+          wrapText(ctx, text, contentW).forEach(wl=>{ ops.push({ type:"footerline", text:wl, y, bold:true }); y += 30; });
+        } else {
+          const frases = text.replace(/([.!?])\s+(?=[A-ZÁÉÍÓÚÑ¡¿])/g, "$1\u0001").split("\u0001");
+          ctx.font = "500 16px 'Work Sans'";
+          frases.forEach(fr=>{ wrapText(ctx, fr, contentW-24).forEach((wl,i)=>{ ops.push({ type:"footerline", text:wl, y, bullet:i===0 }); y += 23; }); y += 6; });
+        }
       });
     }
   });
@@ -2392,32 +2522,32 @@ function drawQuoteOps(ctx, ops, width, pad, contentW, imgMap){
         textX = pad + logoW + 18;
       }
       ctx.fillStyle = "#ffffff";
-      ctx.font = "700 26px 'Fraunces'";
+      ctx.font = "700 25px 'Fraunces'";
       ctx.textAlign = "left";
       ctx.fillText("PLAYA PARAÍSO", textX, 52);
       ctx.font = "600 14px 'Work Sans'";
       ctx.fillStyle = "rgba(255,255,255,0.88)";
       ctx.fillText("ALL INCLUSIVE · Cotización", textX, 76);
     } else if(op.type==="meta"){
-      ctx.font = "600 15px 'Work Sans'";
+      ctx.font = "600 17px 'Work Sans'";
       ctx.fillStyle = op.color || BRAND.ink;
       ctx.textAlign = "left";
-      ctx.fillText(op.text, pad, op.y+14);
+      ctx.fillText(op.text, pad, op.y+16);
     } else if(op.type==="item"){
       let ly = op.y;
-      ctx.font = "600 16px 'Work Sans'";
+      ctx.font = "700 19px 'Work Sans'";
       ctx.fillStyle = BRAND.ink;
       ctx.textAlign = "left";
-      op.labelLines.forEach(l=>{ ctx.fillText(l, pad, ly+14); ly += 22; });
+      op.labelLines.forEach(l=>{ ctx.fillText(l, pad, ly+16); ly += 26; });
       if(op.subLines.length){
-        ctx.font = "400 13px 'Work Sans'";
+        ctx.font = "500 15.5px 'Work Sans'";
         ctx.fillStyle = BRAND.gray;
-        op.subLines.forEach(l=>{ ctx.fillText(l, pad, ly+11); ly += 18; });
+        op.subLines.forEach(l=>{ ctx.fillText(l, pad, ly+12); ly += 21; });
       }
-      ctx.font = "600 16px 'Work Sans'";
+      ctx.font = "700 19px 'Work Sans'";
       ctx.fillStyle = BRAND.ink;
       ctx.textAlign = "right";
-      ctx.fillText(op.price, pad+contentW, op.y+14);
+      ctx.fillText(op.price, pad+contentW, op.y+16);
     } else if(op.type==="roomitem"){
       const img = imgMap ? imgMap.get(op.imgSrc) : null;
       ctx.save();
@@ -2428,19 +2558,19 @@ function drawQuoteOps(ctx, ops, width, pad, contentW, imgMap){
       ctx.restore();
       let ly = op.y;
       const textX = pad + op.textX0;
-      ctx.font = "600 16px 'Work Sans'";
+      ctx.font = "700 19px 'Work Sans'";
       ctx.fillStyle = BRAND.ink;
       ctx.textAlign = "left";
-      op.labelLines.forEach(l=>{ ctx.fillText(l, textX, ly+14); ly += 22; });
+      op.labelLines.forEach(l=>{ ctx.fillText(l, textX, ly+16); ly += 26; });
       if(op.subLines.length){
-        ctx.font = "400 13px 'Work Sans'";
+        ctx.font = "500 15.5px 'Work Sans'";
         ctx.fillStyle = BRAND.gray;
-        op.subLines.forEach(l=>{ ctx.fillText(l, textX, ly+11); ly += 18; });
+        op.subLines.forEach(l=>{ ctx.fillText(l, textX, ly+12); ly += 21; });
       }
-      ctx.font = "600 16px 'Work Sans'";
+      ctx.font = "700 19px 'Work Sans'";
       ctx.fillStyle = BRAND.ink;
       ctx.textAlign = "right";
-      ctx.fillText(op.price, pad+contentW, op.y+14);
+      ctx.fillText(op.price, pad+contentW, op.y+16);
     } else if(op.type==="divider"){
       ctx.strokeStyle = BRAND.line;
       ctx.lineWidth = 1;
@@ -2449,32 +2579,46 @@ function drawQuoteOps(ctx, ops, width, pad, contentW, imgMap){
       ctx.lineTo(pad+contentW, op.y);
       ctx.stroke();
     } else if(op.type==="cols"){
-      op.items.forEach((it,idx)=>{
-        const x = pad + idx*op.colW;
-        ctx.font = "700 10.5px 'Work Sans'";
-        ctx.fillStyle = BRAND.cherry;
+      op.boxes.forEach((bx,idx)=>{
+        const it = op.items[idx];
+        ctx.save(); roundRectPath(ctx, bx.x, op.y, bx.w, op.boxH, 10); ctx.fillStyle = "#FBF6EE"; ctx.fill();
+        ctx.lineWidth = 1; ctx.strokeStyle = BRAND.line; ctx.stroke(); ctx.restore();
         ctx.textAlign = "left";
-        ctx.fillText(it.label.toUpperCase(), x, op.y+10);
-        ctx.font = "400 13px 'Work Sans'";
-        ctx.fillStyle = BRAND.ink;
-        let ly = op.y+30;
-        (op.measured[idx]||[it.value]).forEach(line=>{ ctx.fillText(line, x, ly); ly += 18; });
+        ctx.font = "700 12.5px 'Work Sans'"; ctx.fillStyle = BRAND.cherry; ctx.fillText(it.label.toUpperCase(), bx.x+12, op.y+23);
+        let ly = op.y+48;
+        ctx.font = "600 17px 'Work Sans'"; ctx.fillStyle = BRAND.ink;
+        bx.main.forEach(l=>{ ctx.fillText(l, bx.x+12, ly); ly += 24; });
+        ctx.font = "700 19px 'Work Sans'"; ctx.fillStyle = BRAND.cherry;
+        bx.sub.forEach(l=>{ ctx.fillText(l, bx.x+12, ly+1); ly += 25; });
       });
+    } else if(op.type==="calendar"){
+      op.items.forEach((it,i)=>{
+        const x = pad + i*(op.tileW+op.gap), cx = x + op.tileW/2;
+        ctx.save(); roundRectPath(ctx, x, op.y, op.tileW, op.tileH, 8); ctx.fillStyle = it.nd ? "#F6F1E8" : "#FFFFFF"; ctx.fill();
+        ctx.lineWidth = it.sel ? 2 : 1; ctx.strokeStyle = it.sel ? BRAND.cherry : BRAND.line; ctx.stroke(); ctx.restore();
+        ctx.textAlign = "center";
+        ctx.font = "700 12.5px 'Work Sans'"; ctx.fillStyle = BRAND.gray; ctx.fillText(it.dia, cx, op.y+22);
+        ctx.font = "700 19px 'Work Sans'"; ctx.fillStyle = BRAND.ink; ctx.fillText(String(it.n), cx, op.y+46);
+        ctx.font = it.nd ? "600 11px 'Work Sans'" : "700 12.5px 'Work Sans'"; ctx.fillStyle = it.nd ? BRAND.gray : BRAND.ink; ctx.fillText(it.txt, cx, op.y+66);
+      });
+      ctx.textAlign = "left"; ctx.font = "500 13.5px 'Work Sans'"; ctx.fillStyle = BRAND.gray;
+      let cy = op.y + op.tileH + 20; op.capLines.forEach(l=>{ ctx.fillText(l, pad, cy); cy += 19; });
     } else if(op.type==="sectiontitle"){
-      ctx.font = "700 11px 'Work Sans'";
+      ctx.font = "700 14px 'Work Sans'";
       ctx.fillStyle = BRAND.cherry;
       ctx.textAlign = "left";
-      ctx.fillText(op.text.toUpperCase(), pad, op.y+8);
+      ctx.fillText(op.text.toUpperCase(), pad, op.y+12);
       ctx.strokeStyle = BRAND.line;
       ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(pad, op.y+16); ctx.lineTo(pad+contentW, op.y+16); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(pad, op.y+22); ctx.lineTo(pad+contentW, op.y+22); ctx.stroke();
     } else if(op.type==="checklist"){
       let ly = op.y;
-      ctx.font = "400 13.5px 'Work Sans'";
+      ctx.font = "500 17px 'Work Sans'";
       ctx.fillStyle = BRAND.ink;
       ctx.textAlign = "left";
       op.rows.forEach(lines=>{
-        lines.forEach((line,i)=>{ ctx.fillText((i===0?"✓  ":"    ")+line, pad, ly+12); ly += 20; });
+        lines.forEach((line,i)=>{ ctx.fillText((i===0?"✓  ":"    ")+line, pad, ly+14); ly += 25; });
+        ly += 3;
       });
     } else if(op.type==="upsell"){
       ctx.save();
@@ -2486,21 +2630,21 @@ function drawQuoteOps(ctx, ops, width, pad, contentW, imgMap){
       ctx.setLineDash([]);
       ctx.restore();
       const innerX = pad+16;
-      ctx.font = "700 9.5px 'Work Sans'";
+      ctx.font = "700 12px 'Work Sans'";
       ctx.fillStyle = "#B8842E";
       ctx.textAlign = "left";
-      ctx.fillText((op.tag||"OPCIONAL").toUpperCase(), innerX, op.y+16);
-      let ly = op.y+34;
-      ctx.font = "700 14px 'Work Sans'";
+      ctx.fillText((op.tag||"OPCIONAL").toUpperCase(), innerX, op.y+20);
+      let ly = op.y+44;
+      ctx.font = "700 17px 'Work Sans'";
       ctx.fillStyle = BRAND.ink;
-      op.labelLines.forEach(l=>{ ctx.fillText(l, innerX, ly); ly += 19; });
+      op.labelLines.forEach(l=>{ ctx.fillText(l, innerX, ly); ly += 23; });
       if(op.subLines && op.subLines.length){
-        ctx.font = "400 12.5px 'Work Sans'";
+        ctx.font = "500 14.5px 'Work Sans'";
         ctx.fillStyle = BRAND.gray;
-        op.subLines.forEach(l=>{ ctx.fillText(l, innerX, ly); ly += 16; });
+        op.subLines.forEach(l=>{ ctx.fillText(l, innerX, ly); ly += 19; });
       }
       if(op.price){
-        ctx.font = "700 15px 'Work Sans'";
+        ctx.font = "700 20px 'Work Sans'";
         ctx.fillStyle = BRAND.ink;
         ctx.textAlign = "right";
         ctx.fillText(op.price, pad+contentW-16, op.y+op.boxH/2+5);
@@ -2508,18 +2652,18 @@ function drawQuoteOps(ctx, ops, width, pad, contentW, imgMap){
     } else if(op.type==="total"){
       if(op.big){
         ctx.save();
-        roundRectPath(ctx, pad, op.y, contentW, 54, 5);
+        roundRectPath(ctx, pad, op.y, contentW, 72, 8);
         ctx.fillStyle = op.color || BRAND.maroon;
         ctx.fill();
         ctx.restore();
-        ctx.font = "700 10.5px 'Work Sans'";
-        ctx.fillStyle = "rgba(255,255,255,0.82)";
+        ctx.font = "700 12.5px 'Work Sans'";
+        ctx.fillStyle = "rgba(255,255,255,0.88)";
         ctx.textAlign = "left";
-        ctx.fillText(op.label.toUpperCase(), pad+16, op.y+22);
-        ctx.font = "700 23px 'Fraunces'";
+        ctx.fillText(op.label.toUpperCase(), pad+16, op.y+30);
+        ctx.font = "700 32px 'Fraunces'";
         ctx.fillStyle = "#ffffff";
         ctx.textAlign = "right";
-        ctx.fillText(op.value, pad+contentW-16, op.y+38);
+        ctx.fillText(op.value, pad+contentW-16, op.y+49);
       } else {
         ctx.font = "500 14px 'Work Sans'";
         ctx.fillStyle = op.color || BRAND.ink;
@@ -2529,10 +2673,12 @@ function drawQuoteOps(ctx, ops, width, pad, contentW, imgMap){
         ctx.fillText(op.value, pad+contentW, op.y+12);
       }
     } else if(op.type==="footerline"){
-      ctx.font = op.bold ? "700 12.5px 'Work Sans'" : "400 12px 'Work Sans'";
-      ctx.fillStyle = op.bold ? BRAND.ink : BRAND.gray;
       ctx.textAlign = "left";
-      ctx.fillText(op.text, pad, op.y+10);
+      if(op.bold){ ctx.font = "700 20px 'Work Sans'"; ctx.fillStyle = BRAND.ink; ctx.fillText(op.text, pad, op.y+14); }
+      else {
+        if(op.bullet){ ctx.font = "700 16px 'Work Sans'"; ctx.fillStyle = BRAND.cherry; ctx.fillText("•", pad+4, op.y+12); }
+        ctx.font = "500 16px 'Work Sans'"; ctx.fillStyle = BRAND.ink; ctx.fillText(op.text, pad+22, op.y+12);
+      }
     }
   });
 }
@@ -2574,12 +2720,12 @@ async function saveOrOpen(filename, blob){
 }
 
 async function renderQuoteJPEG(blocks){
-  let { canvas } = await renderQuoteCanvas(blocks, 900, true);
+  let { canvas } = await renderQuoteCanvas(blocks, 560, true);
   let blob = await canvasToBlobSafe(canvas, "image/jpeg", 0.92);
   if(!blob){
     // el lienzo puede quedar "manchado" si una foto no carga desde el mismo origen;
     // reintenta sin fotos para no perder la descarga
-    const retry = await renderQuoteCanvas(blocks, 900, false);
+    const retry = await renderQuoteCanvas(blocks, 560, false);
     canvas = retry.canvas;
     blob = await canvasToBlobSafe(canvas, "image/jpeg", 0.92);
   }
@@ -2687,6 +2833,7 @@ function renderConfig(){
       <button data-sub="marca" class="${configSubtab==='marca'?'active':''}">Marca y ventas</button>
       <button data-sub="especiales" class="${configSubtab==='especiales'?'active':''}">Day Use y Eventos</button>
       <button data-sub="calendario" class="${configSubtab==='calendario'?'active':''}">Calendario de temporadas</button>
+      <button data-sub="planes" class="${configSubtab==='planes'?'active':''}">Planes por día</button>
       ${esDevU(CURRENT_USER) ? `<button data-sub="usuarios" class="${configSubtab==='usuarios'?'active':''}">Usuarios y accesos</button>` : ''}
     </div>
     <div id="cfgBody"></div>
@@ -2719,7 +2866,41 @@ function renderConfigBody(){
   if(configSubtab==='marca') return renderCfgMarca(body);
   if(configSubtab==='especiales') return renderCfgEspeciales(body);
   if(configSubtab==='calendario') return renderCfgCalendario(body);
+  if(configSubtab==='planes') return renderCfgPlanes(body);
   if(configSubtab==='usuarios') return renderCfgUsuarios(body);
+}
+
+/* ---------- Planes por día y temporada ---------- */
+let planesTemporadaSel = 'base';
+function renderCfgPlanes(body){
+  const PP = CFG.planesPermitidos; PP.temporadas = PP.temporadas || {};
+  const sel = planesTemporadaSel;
+  const TEMP = {base:'Todas las temporadas (regla general)', alta:'Temporada alta', baja:'Temporada baja', especial:'Temporada especial (1 dic – 4 ene)'};
+  const propia = sel!=='base' && !!PP.temporadas[sel];
+  const matriz = sel==='base' ? PP.base : (PP.temporadas[sel] || PP.base);
+  const FILAS = [['dom','Domingo'],['lun','Lunes'],['mar','Martes'],['mie','Miércoles'],['jue','Jueves'],['vie','Viernes'],['sab','Sábado'],['feriado','Feriados y puentes']];
+  body.innerHTML = `
+  <div class="card"><h3>Planes que se pueden cotizar por día</h3>
+    <div class="small-note">Marca qué planes se ofrecen cada día. Si una estadía incluye un día donde un plan no aplica, el cotizador solo habilita los planes que aplican a todas las noches. All Inclusive siempre está disponible. Los feriados incluyen los días puente.</div>
+    <label>Temporada</label>
+    <select id="pl_temp">${Object.keys(TEMP).map(k=>`<option value="${k}" ${sel===k?'selected':''}>${TEMP[k]}</option>`).join('')}</select>
+    ${sel==='base' ? '' : `<label style="display:flex; align-items:center; gap:8px; font-weight:400; margin-top:8px;"><input type="checkbox" id="pl_propia" ${propia?'checked':''} style="width:auto;"> Usar reglas propias en esta temporada (si no, aplica la regla general)</label>`}
+    <table class="tbl" style="margin-top:10px;"><tr><th>Día</th><th>Bed & Breakfast</th><th>Full Board</th><th>All Inclusive</th></tr>
+      ${FILAS.map(([k,n])=>`<tr><td>${n}</td>
+        <td><input type="checkbox" class="pl-ck" data-k="${k}" data-p="BB" ${(matriz[k]||[]).includes('BB')?'checked':''} ${(sel!=='base' && !propia)?'disabled':''} style="width:auto;"></td>
+        <td><input type="checkbox" class="pl-ck" data-k="${k}" data-p="FB" ${(matriz[k]||[]).includes('FB')?'checked':''} ${(sel!=='base' && !propia)?'disabled':''} style="width:auto;"></td>
+        <td><input type="checkbox" checked disabled style="width:auto;"></td></tr>`).join('')}
+    </table>
+  </div>`;
+  document.getElementById('pl_temp').onchange = e=>{ planesTemporadaSel = e.target.value; renderCfgPlanes(body); };
+  const pp = document.getElementById('pl_propia');
+  if(pp) pp.onchange = e=>{ if(e.target.checked){ PP.temporadas[sel] = JSON.parse(JSON.stringify(PP.base)); } else { delete PP.temporadas[sel]; } renderCfgPlanes(body); };
+  body.querySelectorAll('.pl-ck').forEach(c=>c.onchange = e=>{
+    const m = sel==='base' ? PP.base : PP.temporadas[sel]; if(!m) return;
+    const k = e.target.dataset.k, pl = e.target.dataset.p; const s = new Set(m[k]||[]); s.add('AI');
+    if(e.target.checked) s.add(pl); else s.delete(pl);
+    m[k] = ['BB','FB','AI'].filter(x=>s.has(x));
+  });
 }
 
 function renderCfgCalendario(body){
