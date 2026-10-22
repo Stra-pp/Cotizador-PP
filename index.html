@@ -452,6 +452,15 @@ function defaultConfig(){
     usuariosCot: usuariosPorDefecto(), // personas con acceso al cotizador (rol y PIN)
     temporadaCalendario:{}, // ajustes manuales de un día puntual: { 'YYYY-MM-DD': 'alta'|'baja'|'especial' }
     incluirMoviles:true,
+    // Textos del mensaje corto de WhatsApp (editables en Configuración → Mensaje al cliente)
+    wa:{
+      hospedaje:'Para reservar: 50% de garantía (transferencia, depósito o tarjeta) y el saldo al llegar.',
+      pool:'Para confirmar: 50% o 100% de pago previo (Payphone, depósito o transferencia). No aplica reembolso; se permite 1 cambio de fecha con 24 h de anticipación.',
+      vigencia:'⏳ Cotización vigente por 24 horas.',
+      cierreHospedaje:'¿Le separamos la reserva? 🙌',
+      cierrePool:'¿Le reservamos su día? 🙌',
+      cierreEvento:'¿Le reservamos su lugar? 🙌'
+    },
     puentesAuto:true, // los días puente (fines de semana largos) llevan tarifa de feriado
     // Planes que se pueden cotizar según el día (y, si se quiere, la temporada). Todo Incluido siempre está disponible.
     // Los feriados incluyen los días puente. 'temporadas' permite reglas propias: { alta:{...}, baja:{...}, especial:{...} }.
@@ -601,6 +610,7 @@ function migrarConfig(cfg){
   if(!cfg.usuariosCot){ cfg.usuariosCot = usuariosPorDefecto(); cambio = true; }
   if(cfg.puentesAuto===undefined){ cfg.puentesAuto = true; cambio = true; }
   if(!cfg.planesPermitidos){ cfg.planesPermitidos = defaultConfig().planesPermitidos; cambio = true; }
+  if(!cfg.wa){ cfg.wa = defaultConfig().wa; cambio = true; }
   if(typeof cfg.politicaHospedaje==='string' && /Los valores abonados no son reembolsables/.test(cfg.politicaHospedaje)){ // leyenda retirada de las cotizaciones
     cfg.politicaHospedaje = cfg.politicaHospedaje.replace(/\s*Los valores abonados no son reembolsables\.?/,'').trim(); cambio = true; }
   { // Pool Day Regular en feriados y puentes + paquetes festivos del PDF actualizado
@@ -820,6 +830,24 @@ function incluyeBlocks(lineas, titulo){
   lineas.filter(incluyeEsNegativo).forEach(t=>out.push({type:'item', label:t, price:''}));
   return out;
 }
+// ---------- WhatsApp corto y cercano (cliente ecuatoriano): saludo según la hora, "usted", una idea por línea ----------
+function waSaludo(nombre){
+  const hr = new Date().getHours(); const s = hr<12 ? '¡Buenos días' : (hr<19 ? '¡Buenas tardes' : '¡Buenas noches');
+  const n = String(nombre||'').trim().split(/\s+/)[0];
+  return s + (n ? ', '+n : '') + '! 😊';
+}
+// "Alojamiento", "Snacks: 11h00 – 17h00" → "alojamiento, snacks (11h00 – 17h00) y …"
+function waLista(items, omitir){
+  const a = (items||[]).map(t=>String(t).trim()).filter(t=>t && !(omitir && omitir.test(t)))
+    .map(t=>t.replace(/^([^:]+):\s*(.+)$/,'$1 ($2)')).map(t=>t.charAt(0).toLowerCase()+t.slice(1));
+  return a.length<=1 ? a.join('') : a.slice(0,-1).join(', ')+' y '+a[a.length-1];
+}
+function waFecha(d){ const anio = d.getFullYear()!==new Date().getFullYear() ? '/'+d.getFullYear() : ''; return DN_CORTO[d.getDay()]+' '+pad2(d.getDate())+'/'+pad2(d.getMonth()+1)+anio; }
+const WA_PLAN_RESUMEN = {BB:'desayuno', FB:'desayuno, almuerzo y cena', AI:'todas las comidas, snacks y bebidas'};
+// Personas extra, mascotas y adicionales en una sola línea
+function waAdicionales(items){ return items.length ? '➕ *Adicionales:* '+items.join('; ')+'\n' : ''; }
+function waPersonasExtra(st, tf){ const v = pexValores(); return pexCantidades(st).map((n,i)=> n ? 'Persona extra ×'+n+' ('+money(v[i]*tf)+'/noche)' : null).filter(Boolean); }
+function waExtras(extrasDetalle, tf){ return (extrasDetalle||[]).map(ex=>ex.nombre+' ×'+ex.qty+' ('+money(ex.flat?ex.total:ex.total*tf)+')'); }
 function incluyeWa(lineas, encabezado){
   if(!lineas || !lineas.length) return '';
   return `✨ *${encabezado}*\n` + lineas.map(t=>`• ${t}`).join('\n') + '\n\n';
@@ -1022,11 +1050,19 @@ function tiraFechasHosp(st){
     const tot = pasada ? null : st.lineas.reduce((s,l)=> s + planTotalSinImpuestos(fmtYMD(d), st.noches, l.categoria, st.promocionManual, l.tipoHab, l.ocupacion, l.plan, l.rackTipo), 0);
     const n = d.getDate()+(d.getDate()===1?' '+MES[d.getMonth()]:'');
     const soloAI = tot!==null && st.lineas.some(l=>l.categoria!=='rack' && l.plan!=='AI' && Array.from({length:st.noches},(_,k)=>!planPermitidoNoche(l.plan, addDays(d,k))).some(Boolean));
-    items.push({dia:DN[d.getDay()], n, lbl:DN[d.getDay()]+' '+n, txt: tot===null?'No disp.':money(tot*tf)+(soloAI?'*':''), nd: tot===null, sel: i===0, star: soloAI});
+    items.push({fecha:fmtYMD(d), precio: tot===null?null:tot*tf, dia:DN[d.getDay()], n, lbl:DN[d.getDay()]+' '+n, txt: tot===null?'No disp.':money(tot*tf)+(soloAI?'*':''), nd: tot===null, sel: i===0, star: soloAI});
   }
   return items;
 }
 const TIRA_NOTA = 'Valor del hospedaje si cambias la fecha de llegada, para la misma habitación y el mismo número de noches (impuestos incluidos).';
+// Sugerencia amable para WhatsApp: la fecha cercana más económica (si existe)
+function waSugerenciaFecha(tira){
+  if(!tira) return '';
+  const sel = tira.find(t=>t.sel); if(!sel || sel.precio==null) return '';
+  const alt = tira.filter(t=>!t.sel && !t.nd && t.precio!=null && t.precio < sel.precio-0.005).sort((a,b)=>a.precio-b.precio)[0];
+  if(!alt) return '';
+  return '💡 Si tiene flexibilidad: llegando el '+waFecha(parseYMD(alt.fecha))+' el hospedaje baja a '+money(alt.precio)+' (ahorra '+money(sel.precio-alt.precio)+').\n\n';
+}
 function tiraNotaCompleta(tira){ return TIRA_NOTA + ((tira||[]).some(t=>t.star) ? ' * Incluye noches en All Inclusive: en esos días no aplican los otros planes.' : ''); }
 function tiraHtmlHosp(tira){
   if(!tira) return '';
@@ -1503,23 +1539,17 @@ function computeHospedajeFestivo(st){
   }
 
   // ---- Texto para WhatsApp ----
-  const saludo = st.clienteNombre ? `Estimado(a) ${st.clienteNombre},` : 'Estimado(a) cliente,';
-  let wa = `${saludo}\n\n`;
-  wa += `¡Gracias por su interés en nuestro paquete de ${pack.nombre}! 🎉 A continuación el detalle:\n\n`;
-  wa += `📅 *Fechas*\nCheck-in: ${fmtLong(inicio)} (a partir de las ${CFG.checkIn})\nCheck-out: ${fmtLong(addDays(inicio,noches))} (hasta las ${CFG.checkOut})\n${LABEL_PAQUETE[st.festDuracion]}\n\n`;
-  wa += `🏨 *Alojamiento*\n`;
-  lineasF.forEach(({linea,precio})=>{ wa += `• ${linea.label}: ${money(precio.sin*tf)}\n`; });
-  wa += `\n✨ *Tu paquete incluye*\n`;
-  pack.incluye.forEach(i=>{ wa += `• ${i}\n`; });
-  wa += `\n`;
-  if(cargoPersonaExtra) wa += pexTextoWa(st, tf);
-  if(cargoMascotas) wa += `Mascotas: ${money(cargoMascotas*tf)}\n`;
-  extrasDetalle.forEach(ex=>{ wa += `${ex.nombre} ×${ex.qty}: ${money(ex.flat?ex.total:ex.total*tf)}\n`; });
-  if(descuentoMonto>0) wa += `Descuento (${descLabel}): -${money(descuentoMonto*tf)}\n`;
-  wa += `\n💰 *TOTAL A PAGAR (incluye impuestos): ${money(total)}*\n`;
-  wa += `Valores expresados en USD (dólares de los Estados Unidos).\n\n`;
-  wa += `📌 ${CFG.politicaHospedaje}\n\n`;
-  wa += `Quedamos atentos para coordinar los siguientes pasos. ¡Será un gusto recibirle en Playa Paraíso! 😊`;
+  let wa = `${waSaludo(st.clienteNombre)}\nCon gusto le comparto su paquete de *${pack.nombre}* en Playa Paraíso 🎉\n\n`;
+  if(lineasF.length===1){ wa += `🏨 *${lineasF[0].linea.label}* · ${LABEL_PAQUETE[st.festDuracion]}\n`; }
+  else { wa += `🏨 *Habitaciones* · ${LABEL_PAQUETE[st.festDuracion]}\n` + lineasF.map(({linea,precio})=>`• ${linea.label}: ${money(precio.sin*tf)}`).join('\n') + `\n`; }
+  wa += `📅 ${waFecha(inicio)} → ${waFecha(addDays(inicio,noches))} (${noches} noche${noches>1?'s':''})\n`;
+  wa += `🕒 Ingreso desde las ${CFG.checkIn} · Salida hasta las ${CFG.checkOut}\n\n`;
+  wa += `✨ *El paquete incluye*\n` + pack.incluye.map(i=>`• ${i}`).join('\n') + `\n\n`;
+  const adicF = [].concat(cargoPersonaExtra ? waPersonasExtra(st, tf) : [], cargoMascotas ? ['Mascotas ('+money(cargoMascotas*tf)+')'] : [], waExtras(extrasDetalle, tf));
+  { const ex = waAdicionales(adicF) + (descuentoMonto>0 ? `🎁 Descuento aplicado: -${money(descuentoMonto*tf)}\n` : ''); if(ex) wa += ex + `\n`; }
+  wa += `💰 *Total: ${money(total)}* (impuestos incluidos)\n\n`;
+  wa += `📌 ${CFG.wa.hospedaje}\n${CFG.wa.vigencia}\n\n`;
+  wa += CFG.wa.cierreHospedaje;
   document.getElementById('h_waText').value = wa;
 }
 
@@ -1770,34 +1800,25 @@ function computeHospedaje(){
     window.__blocksHospedaje = blocks;
   }
 
-  // Texto para el cliente (WhatsApp) — tono cálido, formal y claro
-  const saludo = st.clienteNombre ? `Estimado(a) ${st.clienteNombre},` : 'Estimado(a) cliente,';
-  let wa = `${saludo}\n\n`;
-  wa += `¡Gracias por su interés en Playa Paraíso All Inclusive! 🌴 A continuación el detalle de su cotización:\n\n`;
-  wa += `📅 *Fechas*\n`;
-  wa += `Check-in: ${fmtLong(inicio)} (a partir de las ${CFG.checkIn})\n`;
-  wa += `Check-out: ${fmtLong(addDays(inicio,st.noches))} (hasta las ${CFG.checkOut})\n`;
-  wa += `${st.noches} noche${st.noches>1?'s':''}\n\n`;
-  wa += `🏨 *Alojamiento*\n`;
-  lineasConTotal.forEach(({linea,sinImp})=>{
-    const sub = (linea.categoria==='rack' ? 'Todo Incluido' : `${linea.ocupacion} persona${linea.ocupacion>1?'s':''} · Plan ${planEtq(st, linea)}`);
-    wa += `• ${linea.label} — ${sub}: ${money(sinImp*taxFactor())}\n`;
-  });
-  wa += `\n`;
-  if(hayMix){ wa += `🗓️ *Qué incluye cada noche*\n`; detMix.forEach(({linea,grupos})=>grupos.forEach(g=>{ wa += `• ${linea.label} — ${g.rango} · ${PLAN_TI[g.plan]}: ${money(g.sin*taxFactor())}\n   Incluye: ${g.incluye.join(', ')}\n`; })); }
-  wa += incluyeWa(inclusiones, 'Tu plan incluye'); // la misma lista que ve el cliente en la tarjeta y en el PDF
-  if(pexPorNoche(st)) wa += pexTextoWa(st, taxFactor());
-  if(st.mascPeq) wa += `Mascota raza pequeña: ${st.mascPeq} × ${money(CFG.mascotaPorNoche.pequena*taxFactor())}/noche\n`;
-  if(st.mascGrande) wa += `Mascota raza grande: ${st.mascGrande} × ${money(CFG.mascotaPorNoche.grande*taxFactor())}/noche\n`;
-  extrasDetalle.forEach(ex=>{ wa += `${ex.nombre} ×${ex.qty}: ${money(ex.flat?ex.total:ex.total*taxFactor())}\n`; });
-  wa += `\n💰 *Resumen*\n`;
-  wa += `Subtotal: ${money(subtotalSinImp*taxFactor())}\n`;
-  if(descuentoMonto>0) wa += `Descuento (${descLabel}): -${money(descuentoMonto*taxFactor())}\n`;
-  wa += `*TOTAL A PAGAR (incluye impuestos): ${money(total)}*\n`;
-  wa += `Valores expresados en USD (dólares de los Estados Unidos).\n\n`;
-  if(tira) wa += `📅 *Tarifa por fecha de llegada* (hospedaje, impuestos incluidos)\n${tira.filter(t=>!t.nd).map(t=>`${t.lbl}: ${t.txt}`).join(' · ')}\n\n`;
-  wa += `📌 ${politicaH}\n\n`;
-  wa += `Quedamos atentos para coordinar los siguientes pasos. ¡Será un gusto recibirle en Playa Paraíso! 😊`;
+  // Texto para el cliente (WhatsApp): corto, cálido y solo lo importante
+  const tfW = taxFactor();
+  let wa = `${waSaludo(st.clienteNombre)}\nCon gusto le comparto su cotización en *Playa Paraíso* 🌴\n\n`;
+  const etiquetaLinea = linea => linea.categoria==='rack' ? `${linea.label} · Todo Incluido` : `${linea.label} · ${linea.ocupacion} persona${linea.ocupacion>1?'s':''} · ${planEtq(st, linea)}`;
+  if(lineasConTotal.length===1){ wa += `🏨 *${etiquetaLinea(lineasConTotal[0].linea)}*\n`; }
+  else { wa += `🏨 *Habitaciones*\n` + lineasConTotal.map(({linea,sinImp})=>`• ${etiquetaLinea(linea)}: ${money(sinImp*tfW)}`).join('\n') + `\n`; }
+  wa += `📅 ${waFecha(inicio)} → ${waFecha(addDays(inicio,st.noches))} (${st.noches} noche${st.noches>1?'s':''})\n`;
+  wa += `🕒 Ingreso desde las ${CFG.checkIn} · Salida hasta las ${CFG.checkOut}\n\n`;
+  if(hayMix){
+    wa += `🍽️ *Qué incluye cada noche*\n`;
+    detMix.forEach(({linea,grupos})=>grupos.forEach(g=>{ wa += `• ${lineasConTotal.length>1?linea.label+' · ':''}${g.rango.replace(' (1 noche)','').replace(/ \((\d+) noches\)/,' · $1 noches')} · ${PLAN_TI[g.plan]}: ${WA_PLAN_RESUMEN[g.plan]} (${money(g.sin*tfW)})\n`; }));
+    wa += `\n`;
+  } else if(inclusiones.length){ wa += `✅ Incluye ${waLista(inclusiones)}.\n\n`; }
+  const adic = [].concat(pexPorNoche(st) ? waPersonasExtra(st, tfW) : [], st.mascPeq ? ['Mascota pequeña ×'+st.mascPeq+' ('+money(CFG.mascotaPorNoche.pequena*tfW)+'/noche)'] : [], st.mascGrande ? ['Mascota grande ×'+st.mascGrande+' ('+money(CFG.mascotaPorNoche.grande*tfW)+'/noche)'] : [], waExtras(extrasDetalle, tfW));
+  { const ex = waAdicionales(adic) + (descuentoMonto>0 ? `🎁 Descuento aplicado: -${money(descuentoMonto*tfW)}\n` : ''); if(ex) wa += ex + `\n`; }
+  wa += `💰 *Total: ${money(total)}* (impuestos incluidos)\n\n`;
+  wa += `📌 ${CFG.wa.hospedaje}\n${CFG.wa.vigencia}\n\n`;
+  wa += waSugerenciaFecha(tira);
+  wa += CFG.wa.cierreHospedaje;
   document.getElementById('h_waText').value = wa;
 }
 
@@ -2284,21 +2305,16 @@ function computePool(){
     window.__blocksPoolday = blocks;
   }
 
-  const saludoP = st.clienteNombre ? `Estimado(a) ${st.clienteNombre},` : 'Estimado(a) cliente,';
-  let wa = `${saludoP}\n\n`;
-  wa += `¡Gracias por su interés en nuestro Pool Day! 🌴 Le comparto el detalle:\n\n`;
-  wa += `📅 *Fecha*: ${fmtLong(fechaVisita)}\n`;
-  wa += `🏖️ *Tipo*: Pool Day ${poolNombre(st.tipo)}\n`;
-  wa += `⏰ *Horario de instalaciones*: ${CFG.poolday.horarios[st.tipo]}\n`;
-  wa += `\n` + incluyeWa(CFG.poolday.incluye[st.tipo], 'Tu Pool Day incluye');
-  wa += `👥 Adultos: ${st.adultos}   Niños (3-10 años): ${st.ninos}\n`;
-  if(st.mascPeq||st.mascGrande) wa += `🐾 Mascotas: ${st.mascPeq} pequeña(s), ${st.mascGrande} grande(s)\n`;
-  if(upgradeCharge) wa += `⬆️ Upgrade a Day Use: ${st.habitacionesUpgrade} habitación(es)\n`;
-  if(descuentoMonto>0) wa += `🏷️ Descuento (${descLabel}): -${money(descuentoMonto*taxFactor())}\n`;
-  wa += `\n💰 *TOTAL A PAGAR (incluye impuestos): ${money(total)}*\n`;
-  wa += `Valores expresados en USD (dólares de los Estados Unidos).\n\n`;
-  wa += `📌 ${CFG.politicaPoolday}\n\n`;
-  wa += `Quedamos atentos para coordinar los siguientes pasos. ¡Será un gusto recibirle en Playa Paraíso! 😊`;
+  let wa = `${waSaludo(st.clienteNombre)}\nCon gusto le comparto su *Pool Day* en Playa Paraíso 🏖️\n\n`;
+  wa += `🎟️ *Pool Day ${poolNombre(st.tipo)}*\n`;
+  wa += `📅 ${fmtLong(fechaVisita)} · ${CFG.poolday.horarios[st.tipo]}\n`;
+  wa += `👥 ${st.adultos} adulto${st.adultos!==1?'s':''}${st.ninos?' y '+st.ninos+' niño'+(st.ninos!==1?'s':'')+' (3-10 años)':''}\n\n`;
+  { const its = CFG.poolday.incluye[st.tipo].map(t=>t.replace(/^(Uso de instalaciones):.*$/i,'$1')); const no = its.filter(t=>/^no incluye/i.test(t)); wa += `✅ Incluye ${waLista(its, /^no incluye/i)}.${no.length ? ' '+no[0].replace(/\.?$/,'.') : ''}\n\n`; }
+  const adicP = [].concat(st.mascPeq ? ['Mascota pequeña ×'+st.mascPeq] : [], st.mascGrande ? ['Mascota grande ×'+st.mascGrande] : [], upgradeCharge ? ['Mejora a Day Use ('+st.habitacionesUpgrade+' habitación'+(st.habitacionesUpgrade!==1?'es':'')+')'] : []);
+  { const ex = waAdicionales(adicP) + (descuentoMonto>0 ? `🎁 Descuento aplicado: -${money(descuentoMonto*taxFactor())}\n` : ''); if(ex) wa += ex + `\n`; }
+  wa += `💰 *Total: ${money(total)}* (impuestos incluidos)\n\n`;
+  wa += `📌 ${CFG.wa.pool}\n\n`;
+  wa += CFG.wa.cierrePool;
   document.getElementById('p_waText').value = wa;
 }
 
@@ -3034,7 +3050,18 @@ function renderCfgMensaje(body){
   <div class="card"><h3>Política mostrada en la cotización de Pool Day</h3>
     <textarea id="cfg_pol_pool" rows="4">${CFG.politicaPoolday}</textarea>
   </div>
-  <div class="small-note">Este texto se inserta automáticamente al final del mensaje que se copia para enviar por WhatsApp.</div>
+  <div class="small-note">Estas políticas se muestran en la tarjeta, el PDF y la imagen de la cotización.</div>
+  <div class="card"><h3>Mensaje corto de WhatsApp</h3>
+    <div class="small-note">El WhatsApp lleva solo lo importante: saludo según la hora, fechas, plan, qué incluye, total, cómo reservar y una invitación a responder. Aquí editas los textos fijos.</div>
+    <label>Cómo reservar (Hospedaje y paquetes festivos)</label><textarea id="cfg_wa_hosp" rows="2">${CFG.wa.hospedaje}</textarea>
+    <label>Cómo confirmar (Pool Day, Day Use y Eventos)</label><textarea id="cfg_wa_pool" rows="3">${CFG.wa.pool}</textarea>
+    <label>Vigencia de la cotización</label><input type="text" id="cfg_wa_vig" value="${CFG.wa.vigencia}">
+    <div class="row">
+      <div><label>Cierre Hospedaje</label><input type="text" id="cfg_wa_ch" value="${CFG.wa.cierreHospedaje}"></div>
+      <div><label>Cierre Pool Day y Day Use</label><input type="text" id="cfg_wa_cp" value="${CFG.wa.cierrePool}"></div>
+      <div><label>Cierre Eventos</label><input type="text" id="cfg_wa_ce" value="${CFG.wa.cierreEvento}"></div>
+    </div>
+  </div>
   `;
   document.getElementById('cfg_ci').onchange = e=>CFG.checkIn = e.target.value;
   document.getElementById('cfg_co').onchange = e=>CFG.checkOut = e.target.value;
@@ -3043,6 +3070,12 @@ function renderCfgMensaje(body){
   document.getElementById('cfg_pdh_ultra').onchange = e=>CFG.poolday.horarios.ultra = e.target.value;
   document.getElementById('cfg_pol_hosp').onchange = e=>CFG.politicaHospedaje = e.target.value;
   document.getElementById('cfg_pol_pool').onchange = e=>CFG.politicaPoolday = e.target.value;
+  document.getElementById('cfg_wa_hosp').onchange = e=>CFG.wa.hospedaje = e.target.value;
+  document.getElementById('cfg_wa_pool').onchange = e=>CFG.wa.pool = e.target.value;
+  document.getElementById('cfg_wa_vig').onchange = e=>CFG.wa.vigencia = e.target.value;
+  document.getElementById('cfg_wa_ch').onchange = e=>CFG.wa.cierreHospedaje = e.target.value;
+  document.getElementById('cfg_wa_cp').onchange = e=>CFG.wa.cierrePool = e.target.value;
+  document.getElementById('cfg_wa_ce').onchange = e=>CFG.wa.cierreEvento = e.target.value;
 }
 
 function renderCfgMarca(body){
@@ -3463,17 +3496,15 @@ function computeDiurno(){
     window.__blocksDiurno = blocks;
   }
 
-  const saludo = st.clienteNombre ? `Estimado(a) ${st.clienteNombre},` : 'Estimado(a) cliente,';
-  let wa = `${saludo}\n\n`;
-  wa += `¡Gracias por su interés en Day Use en Playa Paraíso! 🌴\n\n`;
-  wa += `📅 *Fecha*: ${fmtLong(fecha)}\n⏰ *Horario*: ${CFG.dayUse.horario}\n👥 *Personas*: ${st.personas} × ${st.unidades} unidad${st.unidades>1?'es':''}\n\n`;
-  wa += incluyeWa(CFG.dayUse.incluye, 'Tu Day Use incluye');
-  wa += `💰 *Resumen*\nSubtotal: ${money(subtotalSinImp*taxFactor())}\n`;
-  if(descuentoMonto>0) wa += `Descuento (${descLabel}): -${money(descuentoMonto*taxFactor())}\n`;
-  wa += `*TOTAL A PAGAR (incluye impuestos): ${money(total)}*\n`;
-  wa += `Valores expresados en USD (dólares de los Estados Unidos).\n\n`;
-  wa += `📌 ${CFG.politicaPoolday}\n\n`;
-  wa += `Quedamos atentos para coordinar los siguientes pasos. ¡Será un gusto recibirle en Playa Paraíso! 😊`;
+  let wa = `${waSaludo(st.clienteNombre)}\nCon gusto le comparto su *Day Use* en Playa Paraíso 🌴\n\n`;
+  wa += `📅 ${fmtLong(fecha)}\n`;
+  wa += `🕒 Ingreso desde las ${CFG.dayUse.checkIn||'10h00'} · Salida hasta las ${CFG.dayUse.checkOut||'18h00'}\n`;
+  wa += `👥 ${st.personas} personas × ${st.unidades} unidad${st.unidades>1?'es':''}\n\n`;
+  wa += `✅ Incluye ${waLista(CFG.dayUse.incluye, /^check-in/i)}.\n\n`;
+  if(descuentoMonto>0) wa += `🎁 Descuento aplicado: -${money(descuentoMonto*taxFactor())}\n\n`;
+  wa += `💰 *Total: ${money(total)}* (impuestos incluidos)\n\n`;
+  wa += `📌 ${CFG.wa.pool}\n\n`;
+  wa += CFG.wa.cierrePool;
   document.getElementById('d_waText').value = wa;
 }
 
@@ -3625,14 +3656,13 @@ function computeEventos(){
     window.__blocksEventos = blocks;
   }
 
-  const saludo = st.clienteNombre ? `Estimado(a) ${st.clienteNombre},` : 'Estimado(a) cliente,';
-  let wa = `${saludo}\n\n¡Gracias por su interés en ${nombreEvento}! 🎉\n\n`;
-  wa += `📅 *Fecha*: ${fmtLong(fecha)}\n👥 Adultos: ${st.adultos}   Niños: ${st.ninos}${st.infantes?('   Infantes: '+st.infantes):''}\n\n`;
-  wa += incluyeWa(incluyeEvento, 'Incluye');
-  wa += `💰 *TOTAL A PAGAR (incluye impuestos): ${money(total)}*\n`;
-  wa += `Valores expresados en USD (dólares de los Estados Unidos).\n\n`;
-  wa += `📌 ${CFG.politicaPoolday}\n\n`;
-  wa += `Quedamos atentos para coordinar los siguientes pasos. ¡Será un gusto recibirle en Playa Paraíso! 😊`;
+  let wa = `${waSaludo(st.clienteNombre)}\nCon gusto le comparto el detalle de *${nombreEvento}* en Playa Paraíso 🎉\n\n`;
+  wa += `📅 ${fmtLong(fecha)}\n`;
+  wa += `👥 ${st.adultos} adulto${st.adultos!==1?'s':''}${st.ninos?' · '+st.ninos+' niño'+(st.ninos!==1?'s':''):''}${st.infantes?' · '+st.infantes+' infante'+(st.infantes!==1?'s':'')+' (sin costo)':''}\n\n`;
+  wa += `✅ *Incluye*\n` + incluyeEvento.map(t=>`• ${t}`).join('\n') + `\n\n`;
+  wa += `💰 *Total: ${money(total)}* (impuestos incluidos)\n\n`;
+  wa += `📌 ${CFG.wa.pool}\n\n`;
+  wa += CFG.wa.cierreEvento;
   document.getElementById('e_waText').value = wa;
 }
 
